@@ -39,14 +39,18 @@ export const SessionView = ({
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
 
+  // 👇 NEW state for listening hint
+  const [showListeningHint, setShowListeningHint] = useState(true);
+
   useDebugMode({
-    enabled: process.env.NODE_END !== 'production',
+    enabled: process.env.NODE_ENV !== 'production',
   });
 
   async function handleSendMessage(message: string) {
     await send(message);
   }
 
+  // Session timeout if agent doesn't join
   useEffect(() => {
     if (sessionStarted) {
       const timeout = setTimeout(() => {
@@ -81,6 +85,14 @@ export const SessionView = ({
     }
   }, [agentState, sessionStarted, room]);
 
+  // 👇 Delay hiding the hint for 2s after first message arrives
+  useEffect(() => {
+    if (messages.length > 0) {
+      const timeout = setTimeout(() => setShowListeningHint(false), 2000);
+      return () => clearTimeout(timeout);
+    }
+  }, [messages.length]);
+
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
   const capabilities = {
     supportsChatInput,
@@ -94,8 +106,6 @@ export const SessionView = ({
       inert={disabled}
       className={cn(
         'opacity-0',
-        // prevent page scrollbar
-        // when !chatOpen due to 'translate-y-20'
         !chatOpen && 'max-h-svh overflow-hidden'
       )}
     >
@@ -112,10 +122,10 @@ export const SessionView = ({
                 key={message.id}
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 1, height: 'auto', translateY: 0.001 }}
+                exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.5, ease: 'easeOut' }}
               >
-                <ChatEntry hideName key={message.id} entry={message} />
+                <ChatEntry hideName entry={message} />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -123,7 +133,6 @@ export const SessionView = ({
       </ChatMessageView>
 
       <div className="bg-background mp-12 fixed top-0 right-0 left-0 h-32 md:h-36">
-        {/* skrim */}
         <div className="from-background absolute bottom-0 left-0 h-12 w-full translate-y-full bg-gradient-to-b to-transparent" />
       </div>
 
@@ -144,21 +153,20 @@ export const SessionView = ({
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{
-                  opacity: sessionStarted && messages.length === 0 ? 1 : 0,
+                  opacity: sessionStarted && showListeningHint ? 1 : 0,
                   transition: {
                     ease: 'easeIn',
-                    delay: messages.length > 0 ? 0 : 0.8,
-                    duration: messages.length > 0 ? 0.2 : 0.5,
+                    duration: 0.5,
                   },
                 }}
-                aria-hidden={messages.length > 0}
+                aria-hidden={!showListeningHint}
                 className={cn(
                   'absolute inset-x-0 -top-12 text-center',
-                  sessionStarted && messages.length === 0 && 'pointer-events-none'
+                  sessionStarted && showListeningHint && 'pointer-events-none'
                 )}
               >
                 <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
-                  Agent is listening, ask it a question
+                  Listening... ask a question
                 </p>
               </motion.div>
             )}
@@ -169,7 +177,7 @@ export const SessionView = ({
               onSendMessage={handleSendMessage}
             />
           </div>
-          {/* skrim */}
+
           <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>

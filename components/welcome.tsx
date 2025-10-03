@@ -36,14 +36,14 @@ export const Welcome = ({
         />
       </svg>
 
-      <p className="text-fg1 max-w-prose pt-1 leading-6 font-medium">
+      {/*<p className="text-fg1 max-w-prose pt-1 leading-6 font-medium">
         Chat live with your voice AI agent
-      </p>
+      </p>*/}
       <Button variant="primary" size="lg" onClick={onStartCall} className="mt-6 w-64 font-mono">
-        {startButtonText}
+        Start
       </Button>
       <footer className="fixed bottom-5 left-0 z-20 flex w-full items-center justify-center">
-        <p className="text-fg1 max-w-prose pt-1 text-xs leading-5 font-normal text-pretty md:text-sm">
+         {/*<p className="text-fg1 max-w-prose pt-1 text-xs leading-5 font-normal text-pretty md:text-sm">
           Need help getting set up? Check out the{' '}
           <a
             target="_blank"
@@ -54,7 +54,7 @@ export const Welcome = ({
             Voice AI quickstart
           </a>
           .
-        </p>
+        </p>*/}
       </footer>
     </section>
   );

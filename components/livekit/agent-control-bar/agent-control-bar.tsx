@@ -163,7 +163,7 @@ export function AgentControlBar({
             </div>
           )}
 
-          {capabilities.supportsVideoInput && visibleControls.camera && (
+         {/*  {capabilities.supportsVideoInput && visibleControls.camera && (
             <div className="flex items-center gap-0">
               <TrackToggle
                 variant="primary"
@@ -190,9 +190,9 @@ export function AgentControlBar({
                 ])}
               />
             </div>
-          )}
+          )}*/}
 
-          {capabilities.supportsScreenShare && visibleControls.screenShare && (
+        {/*  {capabilities.supportsScreenShare && visibleControls.screenShare && (
             <div className="flex items-center gap-0">
               <TrackToggle
                 variant="secondary"
@@ -203,9 +203,9 @@ export function AgentControlBar({
                 className="relative w-auto"
               />
             </div>
-          )}
+          )} */}
 
-          {visibleControls.chat && (
+        {/*  {visibleControls.chat && (
             <Toggle
               variant="secondary"
               aria-label="Toggle chat"
@@ -216,7 +216,7 @@ export function AgentControlBar({
             >
               <ChatTextIcon weight="bold" />
             </Toggle>
-          )}
+          )}*/}
         </div>
         {visibleControls.leave && (
           <Button
@@ -225,8 +225,8 @@ export function AgentControlBar({
             disabled={isDisconnecting}
             className="font-mono"
           >
-            <PhoneDisconnectIcon weight="bold" />
-            <span className="hidden md:inline">END CALL</span>
+            
+            <span className="hidden md:inline">END SESSION</span>
             <span className="inline md:hidden">END</span>
           </Button>
         )}
