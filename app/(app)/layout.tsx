@@ -14,7 +14,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
       <header className="fixed top-0 left-0 z-50 hidden w-full flex-row justify-between p-6 md:flex">
         {/* Changed text-2xl to text-4xl */}
         <h1 className="absolute left-1/2 top-12 -translate-x-1/2 text-4xl font-bold">
-          Virtual Ed
+          Virtual Summer
         </h1>
 
         <a
