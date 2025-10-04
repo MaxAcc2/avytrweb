@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Track } from 'livekit-client';
 import { BarVisualizer, useRemoteParticipants } from '@livekit/components-react';
 import { ChatTextIcon, PhoneDisconnectIcon } from '@phosphor-icons/react/dist/ssr';
@@ -94,6 +94,16 @@ export function AgentControlBar({
     [onDeviceError]
   );
 
+  // ✅ Added: auto shutdown
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      console.log("⏰ Auto-ending session");
+      onLeave(); // behaves same as pressing END SESSION
+    }, 5 * 60 * 1000);  // ✅ change first number for mins
+
+    return () => clearTimeout(timer); // cleanup if user leaves early
+  }, []);
+
   return (
     <div
       aria-label="Voice assistant controls"
@@ -162,61 +172,6 @@ export function AgentControlBar({
               />
             </div>
           )}
-
-         {/*  {capabilities.supportsVideoInput && visibleControls.camera && (
-            <div className="flex items-center gap-0">
-              <TrackToggle
-                variant="primary"
-                source={Track.Source.Camera}
-                pressed={cameraToggle.enabled}
-                pending={cameraToggle.pending}
-                disabled={cameraToggle.pending}
-                onPressedChange={cameraToggle.toggle}
-                className="peer/track relative w-auto rounded-r-none pr-3 pl-3 disabled:opacity-100 md:border-r-0 md:pr-2"
-              />
-              <hr className="bg-separator1 peer-data-[state=off]/track:bg-separatorSerious relative z-10 -mr-px hidden h-4 w-px md:block" />
-              <DeviceSelect
-                size="sm"
-                kind="videoinput"
-                requestPermissions={false}
-                onMediaDeviceError={onCameraDeviceSelectError}
-                onActiveDeviceChange={handleVideoDeviceChange}
-                className={cn([
-                  'pl-2',
-                  'peer-data-[state=off]/track:text-destructive-foreground',
-                  'hover:text-fg1 focus:text-fg1',
-                  'hover:peer-data-[state=off]/track:text-destructive-foreground focus:peer-data-[state=off]/track:text-destructive-foreground',
-                  'rounded-l-none',
-                ])}
-              />
-            </div>
-          )}*/}
-
-        {/*  {capabilities.supportsScreenShare && visibleControls.screenShare && (
-            <div className="flex items-center gap-0">
-              <TrackToggle
-                variant="secondary"
-                source={Track.Source.ScreenShare}
-                pressed={screenShareToggle.enabled}
-                disabled={screenShareToggle.pending}
-                onPressedChange={screenShareToggle.toggle}
-                className="relative w-auto"
-              />
-            </div>
-          )} */}
-
-        {/*  {visibleControls.chat && (
-            <Toggle
-              variant="secondary"
-              aria-label="Toggle chat"
-              pressed={chatOpen}
-              onPressedChange={setChatOpen}
-              disabled={!isAgentAvailable}
-              className="aspect-square h-full"
-            >
-              <ChatTextIcon weight="bold" />
-            </Toggle>
-          )}*/}
         </div>
         {visibleControls.leave && (
           <Button
@@ -225,7 +180,6 @@ export function AgentControlBar({
             disabled={isDisconnecting}
             className="font-mono"
           >
-            
             <span className="hidden md:inline">END SESSION</span>
             <span className="inline md:hidden">END</span>
           </Button>
