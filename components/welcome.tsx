@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import Image from 'next/image'; // <-- THE FIX IS HERE
+import Image from 'next/image'; 
 
 interface WelcomeProps {
   disabled: boolean;

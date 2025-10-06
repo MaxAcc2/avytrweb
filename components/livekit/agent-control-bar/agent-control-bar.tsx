@@ -99,7 +99,7 @@ export function AgentControlBar({
     const timer = setTimeout(() => {
       console.log("⏰ Auto-ending session");
       onLeave(); // behaves same as pressing END SESSION
-    }, 5 * 60 * 1000);  // ✅ change first number for mins
+    }, 1 * 60 * 1000);  // ✅ change first number for mins
 
     return () => clearTimeout(timer); // cleanup if user leaves early
   }, []);
