@@ -41,11 +41,10 @@ export function AgentControlBar({
   const participants = useRemoteParticipants();
   const [chatOpen, setChatOpen] = React.useState(false);
   const [isSendingMessage, setIsSendingMessage] = React.useState(false);
+  const [isDisconnecting, setIsDisconnecting] = React.useState(false);
 
   const isAgentAvailable = participants.some((p) => p.isAgent);
   const isInputDisabled = !chatOpen || !isAgentAvailable || isSendingMessage;
-
-  const [isDisconnecting, setIsDisconnecting] = React.useState(false);
 
   const {
     micTrackRef,
@@ -77,7 +76,7 @@ export function AgentControlBar({
     onDisconnect?.();
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     onChatOpenChange?.(chatOpen);
   }, [chatOpen, onChatOpenChange]);
 
@@ -87,6 +86,7 @@ export function AgentControlBar({
     },
     [onDeviceError]
   );
+
   const onCameraDeviceSelectError = useCallback(
     (error: Error) => {
       onDeviceError?.({ source: Track.Source.Camera, error });
@@ -94,15 +94,12 @@ export function AgentControlBar({
     [onDeviceError]
   );
 
-  // ✅ Added: auto shutdown
+  // ✅ Auto shutdown timer: restarts whenever agent becomes available
   useEffect(() => {
-    const timer = setTimeout(() => {
-      console.log("⏰ Auto-ending session");
-      onLeave(); // behaves same as pressing END SESSION
-    }, 1 * 60 * 1000);  // ✅ change first number for mins
-
-    return () => clearTimeout(timer); // cleanup if user leaves early
-  }, []);
+    if (!isAgentAvailable) return;
+    const timer = setTimeout(onLeave, 60000); // 1 minute
+    return () => clearTimeout(timer);
+  }, [isAgentAvailable]);
 
   return (
     <div
@@ -173,6 +170,7 @@ export function AgentControlBar({
             </div>
           )}
         </div>
+
         {visibleControls.leave && (
           <Button
             variant="destructive"
