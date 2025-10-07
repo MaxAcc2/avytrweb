@@ -97,7 +97,7 @@ export function AgentControlBar({
   // ✅ Auto shutdown timer: restarts whenever agent becomes available
   useEffect(() => {
     if (!isAgentAvailable) return;
-    const timer = setTimeout(onLeave, 60000); // 1 minute
+    const timer = setTimeout(onLeave, 180000); // 3 minutes
     return () => clearTimeout(timer);
   }, [isAgentAvailable]);
 
