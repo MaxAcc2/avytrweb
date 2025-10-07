@@ -2,6 +2,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRemoteParticipants } from '@livekit/components-react';
 
+/**
+ * Measures latency between when the user stops speaking
+ * (detected with Voice Activity Detection) and when
+ * the remote avatar starts responding.
+ */
 export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
@@ -13,7 +18,7 @@ export const ConversationLatencyVAD = () => {
   const latencyHistoryRef = useRef<number[]>([]);
   const remoteParticipants = useRemoteParticipants();
 
-  // --- Voice Activity Detection (VAD) ---
+  // --- Voice Activity Detection (VAD) for local user ---
   useEffect(() => {
     const init = async () => {
       try {
@@ -28,15 +33,16 @@ export const ConversationLatencyVAD = () => {
 
         const checkVolume = () => {
           analyser.getByteFrequencyData(dataArray);
-          const avg = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
+          const avg =
+            dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
 
-          const speaking = avg > 20; // adjust threshold if too sensitive
+          const speaking = avg > 20; // Adjust threshold if needed
 
           if (speaking && !isUserSpeaking) {
             setIsUserSpeaking(true);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
           } else if (!speaking && isUserSpeaking) {
-            // Sustained silence for 400ms => user stopped talking
+            // Sustained silence for 400ms -> user stopped talking
             if (!silenceTimerRef.current) {
               silenceTimerRef.current = setTimeout(() => {
                 setIsUserSpeaking(false);
@@ -65,7 +71,7 @@ export const ConversationLatencyVAD = () => {
     };
   }, [isUserSpeaking]);
 
-  // --- Detect avatar (remote participant) speech start ---
+  // --- Detect when avatar (remote participant) starts speaking ---
   useEffect(() => {
     const remote = remoteParticipants[0];
     if (!remote) return;
@@ -79,20 +85,27 @@ export const ConversationLatencyVAD = () => {
         setLatestLatency(latencyMs);
         latencyHistoryRef.current.push(latencyMs);
 
-        // Compute running average
+        // Compute rolling average
         const avg =
           latencyHistoryRef.current.reduce((a, b) => a + b, 0) /
           latencyHistoryRef.current.length;
         setAverageLatency(avg);
 
-        console.log(`🕒 Conversation latency: ${latencyMs}ms (avg ${avg.toFixed(0)}ms)`);
+        console.log(
+          `🕒 Conversation latency: ${latencyMs}ms (avg ${avg.toFixed(0)}ms)`
+        );
       }
     };
 
     audioPub.on('subscribed', handleSubscribed);
-    return () => audioPub.off('subscribed', handleSubscribed);
+
+    // ✅ Proper cleanup (fixes TypeScript build error)
+    return () => {
+      audioPub.off('subscribed', handleSubscribed);
+    };
   }, [remoteParticipants, userEndTime]);
 
+  // --- Display overlay ---
   return (
     <div className="fixed bottom-5 right-5 bg-black/70 text-white text-xs px-3 py-2 rounded-xl shadow-md font-mono">
       {latestLatency === null ? (
@@ -101,7 +114,9 @@ export const ConversationLatencyVAD = () => {
         <>
           <div>Last: {latestLatency} ms</div>
           {averageLatency && (
-            <div className="text-gray-300">Avg: {averageLatency.toFixed(0)} ms</div>
+            <div className="text-gray-300">
+              Avg: {averageLatency.toFixed(0)} ms
+            </div>
           )}
         </>
       )}
