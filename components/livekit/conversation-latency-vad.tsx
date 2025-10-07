@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { useRemoteParticipants } from '@livekit/components-react';
+import type { RemoteTrackPublication } from 'livekit-client';
 
 /**
  * Measures latency between when the user stops speaking
@@ -76,7 +77,11 @@ export const ConversationLatencyVAD = () => {
     const remote = remoteParticipants[0];
     if (!remote) return;
 
-    const audioPub = remote.getTrackPublication('audio');
+    // ✅ Use the correct way to get the remote audio publication
+    const audioPub: RemoteTrackPublication | undefined = Array.from(
+      remote.trackPublications.values()
+    ).find((pub) => pub.kind === 'audio');
+
     if (!audioPub) return;
 
     const handleSubscribed = () => {
@@ -99,7 +104,7 @@ export const ConversationLatencyVAD = () => {
 
     audioPub.on('subscribed', handleSubscribed);
 
-    // ✅ Proper cleanup (fixes TypeScript build error)
+    // ✅ Proper cleanup
     return () => {
       audioPub.off('subscribed', handleSubscribed);
     };
