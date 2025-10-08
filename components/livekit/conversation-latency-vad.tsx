@@ -8,18 +8,14 @@ import { RoomEvent, type Participant } from 'livekit-client';
 /**
  * Conversation Latency Overlay (ActiveSpeakers-based)
  *
- * What it measures:
- *   latency = time between local End-of-Speech (leaving active speakers)
- *             and the first remote speaker becoming active (agent starts).
+ * Measures time between local End-of-Speech (EoS)
+ * and remote (agent) start-of-speech, using LiveKit’s
+ * server-side ActiveSpeaker events.
  *
- * Why this is reliable:
- *   - Uses LiveKit server-side active speaker detection (no WebAudio/VAD).
- *   - Timestamps both edges independently and pairs them regardless of order.
- *   - Uses performance.now() for precise, monotonic timing.
- *
- * Assumptions:
- *   - There's only one remote "agent" speaker in the room while testing.
- *     (If there are multiple remotes, the first newly-active remote after your EoS is used.)
+ * This version:
+ *  - No waiting message
+ *  - Appears only after first measurement
+ *  - Displays white text in upper-right corner (no box)
  */
 
 export const ConversationLatencyVAD = () => {
@@ -32,59 +28,45 @@ export const ConversationLatencyVAD = () => {
   // State for previous active-speaker set to detect edges
   const prevActiveSidsRef = useRef<Set<string>>(new Set());
   const wasLocalActiveRef = useRef<boolean>(false);
-  const wasAnyRemoteActiveRef = useRef<boolean>(false);
 
-  // Queues for pairing (hold a few recent markers)
-  const eosQueueRef = useRef<number[]>([]);         // local EoS timestamps
-  const agentStartQueueRef = useRef<number[]>([]);  // remote start timestamps
+  // Queues for pairing (hold recent markers)
+  const eosQueueRef = useRef<number[]>([]);
+  const agentStartQueueRef = useRef<number[]>([]);
   const historyRef = useRef<number[]>([]);
 
   useEffect(() => setMounted(true), []);
 
-  // Pairing window (tunable)
-  const MIN_GAP_MS = 50;     // ignore ultra-fast (likely noise)
-  const MAX_GAP_MS = 8000;   // ignore if agent starts much later than EoS
-  const STALE_MS   = 12000;  // cleanup window
-
-  // Try to pair the latest EoS with the latest agent start (in either order)
-  const tryComputeLatency = () => {
-    const now = performance.now();
-
-    // Cleanup old markers
-    eosQueueRef.current = eosQueueRef.current.filter((t) => now - t <= STALE_MS);
-    agentStartQueueRef.current = agentStartQueueRef.current.filter((t) => now - t <= STALE_MS);
-
-    if (eosQueueRef.current.length === 0 || agentStartQueueRef.current.length === 0) {
-      return;
-    }
-
-    // Use most recent timestamps
-    const eos = eosQueueRef.current[eosQueueRef.current.length - 1];
-    const start = agentStartQueueRef.current[agentStartQueueRef.current.length - 1];
-
-    // If agent started after EoS (normal case)
-    if (start >= eos) {
-      const gap = start - eos;
-      if (gap >= MIN_GAP_MS && gap <= MAX_GAP_MS) {
-        recordLatency(gap);
-        // drop used markers
-        eosQueueRef.current = eosQueueRef.current.filter((t) => t > eos);
-        agentStartQueueRef.current = agentStartQueueRef.current.filter((t) => t > start);
-        return;
-      }
-    }
-
-    // If agent started slightly BEFORE our EoS (rare overlap):
-    // hold off; pairing will succeed when the *next* matching edge arrives.
-  };
+  const MIN_GAP_MS = 50;
+  const MAX_GAP_MS = 8000;
+  const STALE_MS = 12000;
 
   const recordLatency = (latency: number) => {
     historyRef.current.push(latency);
     setLatestLatency(latency);
     const avg = historyRef.current.reduce((a, b) => a + b, 0) / historyRef.current.length;
     setAverageLatency(avg);
-    // eslint-disable-next-line no-console
     console.log(`🕒 Conversation latency: ${latency.toFixed(1)} ms (avg ${avg.toFixed(0)} ms)`);
+  };
+
+  const tryComputeLatency = () => {
+    const now = performance.now();
+
+    eosQueueRef.current = eosQueueRef.current.filter((t) => now - t <= STALE_MS);
+    agentStartQueueRef.current = agentStartQueueRef.current.filter((t) => now - t <= STALE_MS);
+
+    if (eosQueueRef.current.length === 0 || agentStartQueueRef.current.length === 0) return;
+
+    const eos = eosQueueRef.current[eosQueueRef.current.length - 1];
+    const start = agentStartQueueRef.current[agentStartQueueRef.current.length - 1];
+
+    if (start >= eos) {
+      const gap = start - eos;
+      if (gap >= MIN_GAP_MS && gap <= MAX_GAP_MS) {
+        recordLatency(gap);
+        eosQueueRef.current = eosQueueRef.current.filter((t) => t > eos);
+        agentStartQueueRef.current = agentStartQueueRef.current.filter((t) => t > start);
+      }
+    }
   };
 
   useEffect(() => {
@@ -93,77 +75,56 @@ export const ConversationLatencyVAD = () => {
 
     const onActiveSpeakersChanged = () => {
       const now = performance.now();
-
-      // Current active speakers set
       const active = r.activeSpeakers; // Participant[]
       const activeSids = new Set(active.map((p) => p.sid));
 
       const local = r.localParticipant;
       const isLocalActive = !!local && activeSids.has(local.sid);
 
-      // Any remote active?
-      const remoteActives: Participant[] = active.filter((p) => !p.isLocal);
-      const isAnyRemoteActive = remoteActives.length > 0;
-
-      // --- Detect local EoS: local was active, now not active
+      // Local EoS: was speaking, now not
       if (wasLocalActiveRef.current && !isLocalActive) {
         eosQueueRef.current.push(now);
-        // eslint-disable-next-line no-console
         console.log('[AS] Local EoS at', now.toFixed(1));
         tryComputeLatency();
       }
 
-      // --- Detect remote start: someone remote became newly active
-      // Compute rising edges for remote participants
+      // Remote start: someone remote became active
       const newlyActiveRemote = [...activeSids].some(
         (sid) => !prevActiveSidsRef.current.has(sid) && sid !== local?.sid
       );
 
       if (newlyActiveRemote) {
         agentStartQueueRef.current.push(now);
-        // eslint-disable-next-line no-console
         console.log('[AS] Remote start at', now.toFixed(1));
         tryComputeLatency();
       }
 
-      // Update "previous" trackers
       prevActiveSidsRef.current = activeSids;
       wasLocalActiveRef.current = isLocalActive;
-      wasAnyRemoteActiveRef.current = isAnyRemoteActive;
     };
 
     r.on(RoomEvent.ActiveSpeakersChanged, onActiveSpeakersChanged);
-
-    // Initialize prev set (in case the event fires after someone is already speaking)
     prevActiveSidsRef.current = new Set(r.activeSpeakers.map((p) => p.sid));
     wasLocalActiveRef.current = !!r.localParticipant && prevActiveSidsRef.current.has(r.localParticipant.sid);
-    wasAnyRemoteActiveRef.current = r.activeSpeakers.some((p) => !p.isLocal);
 
     return () => {
       r.off(RoomEvent.ActiveSpeakersChanged, onActiveSpeakersChanged);
     };
   }, [room]);
 
-  if (!mounted) return null;
+  if (!mounted || latestLatency === null) return null;
 
-  // ---------------- Overlay ----------------
   return createPortal(
     <div
       className="
-        fixed bottom-6 right-6 z-[99999]
-        bg-white text-black text-sm font-mono
-        px-4 py-2 rounded-lg shadow-lg border border-black/20
+        fixed top-6 right-6 z-[99999]
+        text-white text-sm font-mono
+        text-right
       "
     >
-      {latestLatency === null ? (
-        <span>Waiting for first latency…</span>
-      ) : (
-        <>
-          <div>Last: {latestLatency.toFixed(1)} ms</div>
-          {typeof averageLatency === 'number' && (
-            <div className="text-gray-700">Avg: {averageLatency.toFixed(0)} ms</div>
-          )}
-        </>
+      <div>Last: {latestLatency.toFixed(1)} ms</div>
+      {typeof averageLatency === 'number' && (
+        <div className="opacity-70">Avg: {averageLatency.toFixed(0)} ms</div>
       )}
     </div>,
     document.body
