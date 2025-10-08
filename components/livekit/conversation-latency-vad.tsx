@@ -5,10 +5,6 @@ import { createPortal } from 'react-dom';
 import { useRemoteParticipants } from '@livekit/components-react';
 import type { RemoteTrackPublication, RemoteAudioTrack } from 'livekit-client';
 
-/**
- * Measures latency between when the user stops speaking (VAD)
- * and when the remote avatar begins playing audio.
- */
 export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
@@ -24,7 +20,7 @@ export const ConversationLatencyVAD = () => {
 
   useEffect(() => setMounted(true), []);
 
-  // --- Voice Activity Detection (VAD) for local user ---
+  // --- VAD for local user ---
   useEffect(() => {
     const init = async () => {
       try {
@@ -72,29 +68,34 @@ export const ConversationLatencyVAD = () => {
     };
   }, [isUserSpeaking]);
 
-  // --- Detect when avatar (remote participant) starts speaking ---
+  // --- Detect when any remote audio starts playing ---
   useEffect(() => {
     const remote = remoteParticipants[0];
     if (!remote) return;
 
-    const audioPub: RemoteTrackPublication | undefined = Array.from(
-      remote.trackPublications.values()
-    ).find((pub) => pub.kind === 'audio');
+    // Find *any* audio-capable publication
+    const pubs: RemoteTrackPublication[] = Array.from(remote.trackPublications.values());
+    const audioPub =
+      pubs.find((p) => p.kind === 'audio') ||
+      pubs.find((p) => p.source?.toString().includes('microphone')) ||
+      pubs.find((p) => p.track instanceof Object);
 
     if (!audioPub) {
-      console.log('⚠️ No remote audio publication found');
+      console.log('⚠️ No remote audio publication found (scanned', pubs.length, 'pubs)');
       return;
     }
 
     const track = audioPub.track as RemoteAudioTrack | undefined;
     if (!track) {
-      console.log('⚠️ Remote audio track not yet attached');
+      console.log('⚠️ Remote track exists but has no audio track yet');
       return;
     }
 
-    // Attach the track to an invisible <audio> element to monitor playback
+    console.log('✅ Found remote track, attaching for playback detection');
+
+    // Attach to hidden <audio> to detect "play" events
     const audioEl = track.attach();
-    audioEl.muted = true; // avoid echo
+    audioEl.muted = true;
     audioEl.style.display = 'none';
     document.body.appendChild(audioEl);
 
@@ -110,9 +111,7 @@ export const ConversationLatencyVAD = () => {
           latencyHistoryRef.current.length;
         setAverageLatency(avg);
 
-        console.log(
-          `🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`
-        );
+        console.log(`🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`);
       }
     };
 
@@ -127,7 +126,7 @@ export const ConversationLatencyVAD = () => {
 
   if (!mounted) return null;
 
-  // --- Display overlay (portal) ---
+  // --- Overlay UI ---
   return createPortal(
     <div
       className="
