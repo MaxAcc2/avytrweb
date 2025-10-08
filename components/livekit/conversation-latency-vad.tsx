@@ -12,15 +12,11 @@ import type {
   RemoteParticipant,
   RemoteAudioTrack,
 } from 'livekit-client';
-import {
-  RoomEvent,
-  Track,
-} from 'livekit-client';
+import { RoomEvent, Track } from 'livekit-client';
 
 /**
- * Measures latency between:
- *  - when YOU stop speaking (VAD from the SAME local mic track LiveKit publishes)
- *  - when the AVATAR starts playing audio (via remote audio element 'play' on TrackSubscribed)
+ * Latency = time from when YOU stop speaking (VAD on the SAME local mic track)
+ * to when the AVATAR starts audio (remote audio element 'play').
  */
 export const ConversationLatencyVAD = () => {
   const room = useRoomContext();
@@ -29,6 +25,11 @@ export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
   const [userEndTime, setUserEndTime] = useState<number | null>(null);
+  const userEndTimeRef = useRef<number | null>(null); // <- avoids stale closure
+  useEffect(() => {
+    userEndTimeRef.current = userEndTime;
+  }, [userEndTime]);
+
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
   const [mounted, setMounted] = useState(false); // SSR-safe portal gate
 
@@ -36,21 +37,17 @@ export const ConversationLatencyVAD = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const latencyHistoryRef = useRef<number[]>([]);
-
-  // keep track of the currently attached remote audio element so we can clean up
   const remoteAudioCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => setMounted(true), []);
 
   /* ------------------  VAD using the SAME local mic track  ------------------ */
-  const localPubsSize =
-    room?.localParticipant?.trackPublications.size ?? 0;
+  const localPubsSize = room?.localParticipant?.trackPublications.size ?? 0;
 
   useEffect(() => {
     const lp = room?.localParticipant;
     if (!lp) return;
 
-    // Find the LOCAL mic publication LiveKit is actually using
     const pubs = Array.from(lp.trackPublications.values()) as LocalTrackPublication[];
     const micPub =
       pubs.find((p) => p.kind === Track.Kind.Audio) ||
@@ -61,7 +58,6 @@ export const ConversationLatencyVAD = () => {
       return;
     }
 
-    // Create an analyser from the SAME MediaStreamTrack LiveKit publishes
     const mediaStream = new MediaStream([micPub.track.mediaStreamTrack]);
     const ctx = new AudioContext();
     const analyser = ctx.createAnalyser();
@@ -75,20 +71,19 @@ export const ConversationLatencyVAD = () => {
     const loop = () => {
       analyser.getByteFrequencyData(data);
       const avg = data.reduce((a, b) => a + b, 0) / data.length;
-
-      // Be sensitive; this is post-NS mic data
-      const speaking = avg > 3;
+      const speaking = avg > 3; // sensitive for post-NS signal
 
       if (speaking && !isUserSpeaking) {
         setIsUserSpeaking(true);
         if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       } else if (!speaking && isUserSpeaking) {
-        // sustained silence → mark "user stopped talking"
         if (!silenceTimerRef.current) {
           silenceTimerRef.current = setTimeout(() => {
             setIsUserSpeaking(false);
-            setUserEndTime(Date.now());
-            console.log('[VAD] User stopped talking at', Date.now());
+            const t = Date.now();
+            setUserEndTime(t);
+            userEndTimeRef.current = t; // keep ref in sync immediately
+            console.log('[VAD] User stopped talking at', t);
           }, 400);
         }
       }
@@ -109,23 +104,23 @@ export const ConversationLatencyVAD = () => {
 
   /* ------------------  Remote audio playback detection (event-based)  ------------------ */
 
-  // Helper: attach to a RemoteAudioTrack and listen for <audio> 'play'
   const attachPlaybackListener = (track: RemoteAudioTrack) => {
-    // cleanup any previous attachment
+    // cleanup previous
     if (remoteAudioCleanupRef.current) {
       remoteAudioCleanupRef.current();
       remoteAudioCleanupRef.current = null;
     }
 
     const audioEl = track.attach();
-    audioEl.muted = true;            // avoid double audio
-    audioEl.style.display = 'none';  // hidden probe
+    audioEl.muted = true; // probe only
+    audioEl.style.display = 'none';
     document.body.appendChild(audioEl);
 
     const handlePlay = () => {
       console.log('🎧 Remote audio element started playing');
-      if (userEndTime) {
-        const latencyMs = Date.now() - userEndTime;
+      const marker = userEndTimeRef.current; // <- read the CURRENT value
+      if (marker) {
+        const latencyMs = Date.now() - marker;
         latencyHistoryRef.current.push(latencyMs);
         setLatestLatency(latencyMs);
 
@@ -144,7 +139,6 @@ export const ConversationLatencyVAD = () => {
 
     audioEl.addEventListener('play', handlePlay);
 
-    // store cleanup
     remoteAudioCleanupRef.current = () => {
       audioEl.removeEventListener('play', handlePlay);
       track.detach(audioEl);
@@ -152,11 +146,10 @@ export const ConversationLatencyVAD = () => {
     };
   };
 
-  // Effect A: try to attach to any already-subscribed remote audio tracks
+  // A) attach to any already-subscribed remote audio tracks
   useEffect(() => {
     if (!room) return;
 
-    // scan all remote participants and their publications for an audio track
     let attached = false;
     room.remoteParticipants.forEach((rp: RemoteParticipant) => {
       rp.trackPublications.forEach((pub: RemoteTrackPublication) => {
@@ -169,7 +162,6 @@ export const ConversationLatencyVAD = () => {
       });
     });
 
-    // cleanup when component unmounts
     return () => {
       if (remoteAudioCleanupRef.current) {
         remoteAudioCleanupRef.current();
@@ -178,7 +170,7 @@ export const ConversationLatencyVAD = () => {
     };
   }, [room, remoteParticipants.length]);
 
-  // Effect B: listen for NEW subscriptions via Room events (fires when avatar track actually arrives)
+  // B) listen for NEW audio subscriptions
   useEffect(() => {
     if (!room) return;
 
@@ -194,7 +186,6 @@ export const ConversationLatencyVAD = () => {
     };
 
     room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
-
     return () => {
       room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
     };
