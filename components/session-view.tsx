@@ -143,7 +143,8 @@ export const SessionView = ({
           chatOpen ? 'translate-y-0 opacity-100 delay-200' : 'translate-y-20 opacity-0'
         )}
       >
-        <div className="space-y-1 whitespace-pre-wrap">
+        {/* 👇 Tighter spacing + compact line height inside chat bubbles */}
+        <div className="space-y-1 whitespace-pre-wrap [&_*]:leading-tight [&_*]:!my-0">
           <AnimatePresence>
             {messages.map((message: ReceivedChatMessage) => (
               <motion.div
