@@ -31,18 +31,16 @@ export const ChatEntry = ({
     <li
       data-lk-message-origin={messageOrigin}
       title={time.toLocaleTimeString(locale, { timeStyle: 'full' })}
-      className={cn('group flex flex-col !gap-0', className)}
+      // remove default gap for tighter vertical layout
+      className={cn('group flex flex-col gap-0', className)}
       {...props}
     >
       {(!hideTimestamp || !hideName || hasBeenEdited) && (
-        <span
-          className="text-muted-foreground flex text-sm"
-          style={{ lineHeight: 1.15, marginTop: 0, marginBottom: 0 }}
-        >
+        <span className="text-muted-foreground text-sm leading-tight block">
           {!hideName && <strong className="font-medium">{name}</strong>}
 
           {!hideTimestamp && (
-            <span className="align-self-end ml-auto font-mono text-xs opacity-0 transition-opacity ease-linear group-hover:opacity-100">
+            <span className="float-right font-mono text-xs opacity-0 transition-opacity ease-linear group-hover:opacity-100">
               {hasBeenEdited && '*'}
               {time.toLocaleTimeString(locale, { timeStyle: 'short' })}
             </span>
@@ -52,12 +50,9 @@ export const ChatEntry = ({
 
       <span
         className={cn(
-          // block + smaller vertical padding; keep decent horizontal padding
-          'block max-w-4/5 rounded-[20px] px-3 py-1 whitespace-pre-line',
+          'max-w-4/5 rounded-[20px] px-3 py-1 leading-tight',
           isUser ? 'bg-muted ml-auto' : 'mr-auto'
         )}
-        // 🔒 Hard override line-height so it can’t be reset elsewhere
-        style={{ lineHeight: 1.15, marginTop: 0, marginBottom: 0 }}
       >
         {message}
       </span>
