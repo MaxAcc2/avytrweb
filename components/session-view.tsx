@@ -182,7 +182,8 @@ export const SessionView = ({
           <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>
-
+      {/* ✅ Add latency overlay */}
+      {sessionStarted && <ConversationLatencyVAD />}
     </section>
   );
 };
