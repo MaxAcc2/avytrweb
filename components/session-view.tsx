@@ -90,8 +90,12 @@ export const SessionView = ({
   useEffect(() => {
     const checkVideoReady = () => {
       const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
-        Array.from(p.tracks.values()).some(
-          (t) => t.track && t.track.kind === 'video' && !t.isMuted
+        p.getTrackPublications().some(
+          (pub) =>
+            pub.track &&
+            pub.track.kind === 'video' &&
+            pub.isSubscribed &&
+            !pub.isMuted
         )
       );
       if (hasRemoteVideo) {
