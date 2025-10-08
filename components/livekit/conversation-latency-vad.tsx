@@ -2,88 +2,122 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRemoteParticipants } from '@livekit/components-react';
-import type { RemoteParticipant, RemoteTrackPublication, RemoteAudioTrack } from 'livekit-client';
+import { useRoomContext, useRemoteParticipants } from '@livekit/components-react';
+import type {
+  LocalTrackPublication,
+  RemoteParticipant,
+  RemoteTrackPublication,
+  RemoteAudioTrack,
+} from 'livekit-client';
 
+/**
+ * Measures latency between:
+ *  - when YOU stop speaking (VAD from the SAME local mic track LiveKit publishes)
+ *  - when the AVATAR starts playing audio (via the remote audio element 'play' event)
+ */
 export const ConversationLatencyVAD = () => {
+  const room = useRoomContext();
+  const remoteParticipants = useRemoteParticipants();
+
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
   const [userEndTime, setUserEndTime] = useState<number | null>(null);
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(false); // SSR-safe portal gate
 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const latencyHistoryRef = useRef<number[]>([]);
-  const remoteParticipants = useRemoteParticipants();
 
   useEffect(() => setMounted(true), []);
 
-  /* ------------------  Voice Activity Detection  ------------------ */
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const ctx = new AudioContext();
-        const analyser = ctx.createAnalyser();
-        const src = ctx.createMediaStreamSource(stream);
-        src.connect(analyser);
-        analyser.fftSize = 512;
+  /* ------------------  VAD using the SAME local mic track  ------------------ */
+  const localPubsSize = room?.localParticipant?.trackPublications.size ?? 0;
 
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        const loop = () => {
-          analyser.getByteFrequencyData(data);
-          const avg = data.reduce((a, b) => a + b, 0) / data.length;
-          const speaking = avg > 15;
-          if (speaking && !isUserSpeaking) {
-            setIsUserSpeaking(true);
-            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-          } else if (!speaking && isUserSpeaking) {
-            if (!silenceTimerRef.current) {
-              silenceTimerRef.current = setTimeout(() => {
-                setIsUserSpeaking(false);
-                setUserEndTime(Date.now());
-                console.log('[VAD] User stopped talking at', Date.now());
-              }, 400);
-            }
-          }
-          requestAnimationFrame(loop);
-        };
-        requestAnimationFrame(loop);
-        analyserRef.current = analyser;
-        audioContextRef.current = ctx;
-      } catch (e) {
-        console.error('VAD init error:', e);
+  useEffect(() => {
+    const lp = room?.localParticipant;
+    if (!lp) return;
+
+    // Find the LOCAL mic publication LiveKit is actually using
+    const pubs: LocalTrackPublication[] = Array.from(lp.trackPublications.values()) as any;
+    const micPub = pubs.find((p) => p.kind === 'audio') || pubs.find((p) => `${p.source}`.includes('microphone'));
+
+    if (!micPub || !micPub.track || !('mediaStreamTrack' in micPub.track)) {
+      console.log('⚠️ No local audio track yet for VAD; will retry.');
+      return;
+    }
+
+    // Create an analyser from the SAME MediaStreamTrack LiveKit publishes
+    const mediaStream = new MediaStream([micPub.track.mediaStreamTrack]);
+    const ctx = new AudioContext();
+    const analyser = ctx.createAnalyser();
+    const src = ctx.createMediaStreamSource(mediaStream);
+    src.connect(analyser);
+    analyser.fftSize = 512;
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let raf = 0;
+
+    const loop = () => {
+      analyser.getByteFrequencyData(data);
+      const avg = data.reduce((a, b) => a + b, 0) / data.length;
+
+      // Be sensitive; this is post-NS mic data
+      const speaking = avg > 3;
+
+      if (speaking && !isUserSpeaking) {
+        setIsUserSpeaking(true);
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      } else if (!speaking && isUserSpeaking) {
+        // sustained silence → mark "user stopped talking"
+        if (!silenceTimerRef.current) {
+          silenceTimerRef.current = setTimeout(() => {
+            setIsUserSpeaking(false);
+            setUserEndTime(Date.now());
+            console.log('[VAD] User stopped talking at', Date.now());
+          }, 400);
+        }
       }
+
+      raf = requestAnimationFrame(loop);
     };
-    init();
+
+    raf = requestAnimationFrame(loop);
+
+    analyserRef.current = analyser;
+    audioContextRef.current = ctx;
+
     return () => {
-      if (audioContextRef.current) audioContextRef.current.close();
+      cancelAnimationFrame(raf);
+      ctx.close().catch(() => {});
     };
-  }, [isUserSpeaking]);
+    // Re-run when the set of local publications changes (e.g., mic turns on)
+  }, [room, localPubsSize, isUserSpeaking]);
 
-  /* ------------------  Detect avatar playback  ------------------ */
+  /* ------------------  Detect avatar playback (remote audio)  ------------------ */
+  const remotePubsKey = remoteParticipants
+    .map((p) => `${p.sid}:${p.trackPublications.size}`)
+    .join('|');
+
   useEffect(() => {
-    if (!remoteParticipants.length) return;
-
-    // pick the first participant with any published tracks
+    // pick first remote participant that has any tracks
     const remote: RemoteParticipant | undefined = remoteParticipants.find(
       (p) => p.trackPublications.size > 0
     );
-
     if (!remote) {
       console.log('⚠️ No remote participant with tracks yet.');
       return;
     }
 
-    const pubs = Array.from(remote.trackPublications.values());
+    const pubs: RemoteTrackPublication[] = Array.from(remote.trackPublications.values()) as any;
     console.log('🔍 Remote pubs found:', pubs.length, pubs.map((p) => p.source));
 
-    // find any audio track
-    const audioPub: RemoteTrackPublication | undefined = pubs.find(
-      (p) => p.kind === 'audio' || p.source?.toString().includes('microphone')
-    );
+    // Find any audio-like publication
+    const audioPub =
+      pubs.find((p) => p.kind === 'audio') ||
+      pubs.find((p) => `${p.source}`.includes('microphone')) ||
+      pubs.find((p) => !!p.track);
 
     if (!audioPub || !audioPub.track) {
       console.log('⚠️ No remote audio track yet, will re-check on next render');
@@ -93,8 +127,9 @@ export const ConversationLatencyVAD = () => {
     const track = audioPub.track as RemoteAudioTrack;
     console.log('✅ Found remote audio track, attaching listener');
 
+    // Attach to an invisible <audio> to detect playback reliably
     const audioEl = track.attach();
-    audioEl.muted = true;
+    audioEl.muted = true; // avoid double audio
     audioEl.style.display = 'none';
     document.body.appendChild(audioEl);
 
@@ -102,15 +137,18 @@ export const ConversationLatencyVAD = () => {
       console.log('🎧 Remote audio element started playing');
       if (userEndTime) {
         const latencyMs = Date.now() - userEndTime;
-        setLatestLatency(latencyMs);
         latencyHistoryRef.current.push(latencyMs);
+        setLatestLatency(latencyMs);
+
         const avg =
           latencyHistoryRef.current.reduce((a, b) => a + b, 0) /
           latencyHistoryRef.current.length;
         setAverageLatency(avg);
-        console.log(
-          `🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`
-        );
+
+        console.log(`🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`);
+      } else {
+        // Fallback: show that avatar played but we had no VAD marker yet
+        console.log('ℹ️ Avatar audio started but no VAD marker yet.');
       }
     };
 
@@ -121,12 +159,11 @@ export const ConversationLatencyVAD = () => {
       track.detach(audioEl);
       audioEl.remove();
     };
-  }, [remoteParticipants.map((p) => p.trackPublications.size).join(','), userEndTime]);
-  // ^ depend on the number of remote publications so it re-runs when a new track appears
+  }, [remotePubsKey, userEndTime]);
 
   if (!mounted) return null;
 
-  /* ------------------  Overlay UI  ------------------ */
+  /* ------------------  Overlay UI (portal)  ------------------ */
   return createPortal(
     <div
       className="
@@ -140,10 +177,8 @@ export const ConversationLatencyVAD = () => {
       ) : (
         <>
           <div>Last: {latestLatency} ms</div>
-          {averageLatency && (
-            <div className="text-gray-700">
-              Avg: {averageLatency.toFixed(0)} ms
-            </div>
+          {typeof averageLatency === 'number' && (
+            <div className="text-gray-700">Avg: {averageLatency.toFixed(0)} ms</div>
           )}
         </>
       )}
