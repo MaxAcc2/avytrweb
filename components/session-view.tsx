@@ -39,8 +39,6 @@ export const SessionView = ({
   const [chatOpen, setChatOpen] = useState(false);
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
-
-  // 👇 NEW state for listening hint
   const [showListeningHint, setShowListeningHint] = useState(false);
 
   useDebugMode({
@@ -132,16 +130,16 @@ export const SessionView = ({
     <section
       ref={ref}
       inert={disabled}
-      className="relative"
+      className="relative flex flex-col min-h-screen"
     >
-      {/* 💬 Chat overlay with scroll + height limit */}
+      {/* 💬 Chat area BELOW the video (half screen scrollable) */}
       <ChatMessageView
         className={cn(
-          'pointer-events-none absolute inset-0 z-30 flex flex-col justify-end px-3 pb-36 md:px-0 md:pb-48 transition-opacity duration-300',
-          chatOpen ? 'opacity-100' : 'opacity-0'
+          'relative z-10 mx-auto w-full max-w-2xl px-3 pt-32 pb-40 transition-[opacity,transform] duration-300 ease-out md:px-0 md:pt-36 md:pb-48',
+          chatOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'
         )}
       >
-        <div className="pointer-events-auto mx-auto w-full max-w-2xl overflow-y-auto max-h-[50vh] rounded-lg bg-background/70 backdrop-blur-sm p-2 scrollbar-thin scrollbar-thumb-muted-foreground/50 scrollbar-track-transparent">
+        <div className="overflow-y-auto max-h-[50vh] rounded-lg bg-background p-2 shadow-inner scrollbar-thin scrollbar-thumb-muted-foreground/40 scrollbar-track-transparent">
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
               {messages.map((message: ReceivedChatMessage) => (
@@ -160,15 +158,12 @@ export const SessionView = ({
         </div>
       </ChatMessageView>
 
-      {/* Keeps agent video full-size */}
-      <div className="bg-background mp-12 fixed top-0 right-0 left-0 h-32 md:h-36">
-        <div className="from-background absolute bottom-0 left-0 h-12 w-full translate-y-full bg-gradient-to-b to-transparent" />
+      {/* 🎥 Agent / Avatar stays full-size above the chat */}
+      <div className="flex-grow relative z-20">
+        <MediaTiles chatOpen={false} />
       </div>
 
-      {/* Keep avatar full-size, ignore chatOpen */}
-      <MediaTiles chatOpen={false} />
-
-      {/* Control bar and hint */}
+      {/* 🧠 Control bar + Listening hint */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -185,10 +180,7 @@ export const SessionView = ({
                 initial={{ opacity: 0 }}
                 animate={{
                   opacity: showListeningHint ? 1 : 0,
-                  transition: {
-                    ease: 'easeIn',
-                    duration: 0.5,
-                  },
+                  transition: { ease: 'easeIn', duration: 0.5 },
                 }}
                 aria-hidden={!showListeningHint}
                 className={cn(
