@@ -13,16 +13,9 @@ import { RoomEvent, Track } from 'livekit-client';
 
 /**
  * Conversation latency overlay:
- *   Latency = time from local end-of-speech (same LiveKit mic track)
- *             to remote start-of-speech (VAD on avatar audio track).
- *
- * Robustness:
- *  - EMA smoothing on energy
- *  - Min speaking duration to qualify
- *  - Refractory after EoS (no double EoS per turn)
- *  - EoS queue; match avatar start to most-recent fresh EoS (0.3–7s window)
+ * Latency = time from local end-of-speech (VAD on the SAME LiveKit mic track)
+ *           to remote start-of-speech (VAD on avatar's audio track).
  */
-
 export const ConversationLatencyVAD = () => {
   const room = useRoomContext();
   const remoteParticipants = useRemoteParticipants();
@@ -31,58 +24,64 @@ export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
 
-  // Local VAD
+  // Local VAD state
   const isUserSpeakingRef = useRef(false);
-  const speakStartRef = useRef<number | null>(null);
-  const lastEosRef = useRef<number | null>(null);
-  const eosQueueRef = useRef<number[]>([]);
+  const userEndTimeRef = useRef<number | null>(null);
+  const userLastSpokeAtRef = useRef<number | null>(null);
+  const localCtxRef = useRef<AudioContext | null>(null);
+  const localAnalyserRef = useRef<AnalyserNode | null>(null);
   const localRAFRef = useRef<number | null>(null);
   const localSilenceTimerRef = useRef<number | null>(null);
 
-  // Remote VAD
-  const remoteRAFRef = useRef<number | null>(null);
-  const remoteSpeakingRef = useRef(false);
-  const remoteCleanupRef = useRef<(() => void) | null>(null); // ✅ initialize to null
-
-  // WebAudio refs
-  const localCtxRef = useRef<AudioContext | null>(null);
-  const localAnalyserRef = useRef<AnalyserNode | null>(null);
+  // Remote VAD state
   const remoteCtxRef = useRef<AudioContext | null>(null);
   const remoteAnalyserRef = useRef<AnalyserNode | null>(null);
+  const remoteRAFRef = useRef<number | null>(null);
+  const remoteSpeakingRef = useRef(false);
+  const remoteCleanupRef = useRef<(() => void) | null>(null);
 
   // Stats
   const latencyHistoryRef = useRef<number[]>([]);
 
   useEffect(() => setMounted(true), []);
 
-  /* ---------------- Utilities ---------------- */
+  /* ---------------------- Helpers ---------------------- */
 
-  // TS compat cast for DOM lib differences
-  const getAvg = (analyser: AnalyserNode, buf: Uint8Array) => {
-    (analyser as any).getByteFrequencyData(buf as any);
-    let s = 0;
-    for (let i = 0; i < buf.length; i++) s += buf[i];
-    return s / buf.length;
+  // NOTE: Casts fix TS DOM lib mismatch: getByteFrequencyData expects Uint8Array<ArrayBuffer>
+  const avgAmplitude = (analyser: AnalyserNode, arr: Uint8Array) => {
+    (analyser as any).getByteFrequencyData(arr as any); // <-- TS compatibility cast
+    let sum = 0;
+    for (let i = 0; i < arr.length; i++) sum += arr[i];
+    return sum / arr.length;
+  };
+
+  const computeAndRecordLatency = () => {
+    const marker = userEndTimeRef.current;
+    const now = Date.now();
+    // Only compute if we have a fresh local marker (within 12s)
+    if (!marker || now - marker > 12_000) return;
+
+    const latency = now - marker;
+    latencyHistoryRef.current.push(latency);
+    setLatestLatency(latency);
+
+    const avg =
+      latencyHistoryRef.current.reduce((a, b) => a + b, 0) /
+      latencyHistoryRef.current.length;
+    setAverageLatency(avg);
+
+    // Reset marker so we measure per turn
+    userEndTimeRef.current = null;
+
+    // eslint-disable-next-line no-console
+    console.log(`🕒 Conversation latency: ${latency} ms (avg ${avg.toFixed(0)} ms)`);
   };
 
   const clearTimer = (id: number | null) => {
     if (id !== null) window.clearTimeout(id);
   };
 
-  const recordLatencyFromMarker = (marker: number) => {
-    const now = Date.now();
-    const latency = now - marker;
-    latencyHistoryRef.current.push(latency);
-    setLatestLatency(latency);
-    const avg =
-      latencyHistoryRef.current.reduce((a, b) => a + b, 0) /
-      latencyHistoryRef.current.length;
-    setAverageLatency(avg);
-    // eslint-disable-next-line no-console
-    console.log(`🕒 Conversation latency: ${latency} ms (avg ${avg.toFixed(0)} ms)`);
-  };
-
-  /* ---------------- Local VAD (same LiveKit mic track) ---------------- */
+  /* ---------------------- Local VAD (same mic track) ---------------------- */
 
   const localPubsSize = room?.localParticipant?.trackPublications.size ?? 0;
 
@@ -106,48 +105,40 @@ export const ConversationLatencyVAD = () => {
     analyser.fftSize = 512;
     const src = ctx.createMediaStreamSource(mediaStream);
     src.connect(analyser);
-    localCtxRef.current = ctx;
-    localAnalyserRef.current = analyser;
 
     const buf = new Uint8Array(analyser.frequencyBinCount);
 
-    // Tunables for stability
-    const ALPHA = 0.2;
-    const SPEAK_THR = 3.0;
-    const MIN_SPEAK_MS = 700;
-    const SILENCE_MS = 450;
-    const EoS_REFRACT_MS = 1500;
-
-    let ema = 0;
+    // Thresholds tuned for post-noise-suppression
+    const SPEAK_THR = 3;          // speaking if avg amplitude > 3
+    const SILENCE_MS = 450;       // sustained quiet to mark EoS
+    const SPOKE_RECENT_MS = 8_000; // must have spoken recently to set EoS
 
     const loop = () => {
-      const avg = getAvg(analyser, buf);
-      ema = ALPHA * avg + (1 - ALPHA) * ema;
-      const speaking = ema > SPEAK_THR;
+      const avg = avgAmplitude(analyser, buf);
+      const speaking = avg > SPEAK_THR;
 
+      // Rising edge
       if (speaking && !isUserSpeakingRef.current) {
         isUserSpeakingRef.current = true;
-        speakStartRef.current = Date.now();
+        userLastSpokeAtRef.current = Date.now();
         clearTimer(localSilenceTimerRef.current);
         localSilenceTimerRef.current = null;
+        // console.log('[VAD] Speaking… avg=', avg.toFixed(2));
       }
 
+      // Falling edge -> schedule EoS if sustained silence
       if (!speaking && isUserSpeakingRef.current) {
         if (localSilenceTimerRef.current === null) {
           localSilenceTimerRef.current = window.setTimeout(() => {
-            const now = Date.now();
-            const started = speakStartRef.current ?? now;
-            const spokeFor = now - started;
-            const sinceLastEoS = lastEosRef.current ? now - lastEosRef.current : Infinity;
-
-            if (spokeFor >= MIN_SPEAK_MS && sinceLastEoS >= EoS_REFRACT_MS) {
-              eosQueueRef.current.push(now);
-              eosQueueRef.current = eosQueueRef.current.filter((t) => now - t <= 10_000);
-              lastEosRef.current = now;
-              console.log('[VAD] User stopped talking at', now, `(spoke ${spokeFor}ms)`);
-            }
             isUserSpeakingRef.current = false;
-            speakStartRef.current = null;
+            if (
+              userLastSpokeAtRef.current &&
+              Date.now() - userLastSpokeAtRef.current < SPOKE_RECENT_MS
+            ) {
+              const t = Date.now();
+              userEndTimeRef.current = t;
+              console.log('[VAD] User stopped talking at', t);
+            }
             localSilenceTimerRef.current = null;
           }, SILENCE_MS);
         }
@@ -157,6 +148,9 @@ export const ConversationLatencyVAD = () => {
     };
 
     localRAFRef.current = requestAnimationFrame(loop);
+
+    localCtxRef.current = ctx;
+    localAnalyserRef.current = analyser;
 
     return () => {
       if (localRAFRef.current) cancelAnimationFrame(localRAFRef.current);
@@ -168,9 +162,11 @@ export const ConversationLatencyVAD = () => {
     };
   }, [room, localPubsSize]);
 
-  /* ---------------- Remote VAD (avatar audio) ---------------- */
+  /* ---------------------- Remote VAD (avatar audio) ---------------------- */
 
+  // Attach analyser to a RemoteAudioTrack and call computeAndRecordLatency on rising edge
   const attachRemoteVAD = (track: RemoteAudioTrack) => {
+    // Cleanup any previous remote analyser/attachment
     if (remoteCleanupRef.current) {
       remoteCleanupRef.current();
       remoteCleanupRef.current = null;
@@ -179,48 +175,37 @@ export const ConversationLatencyVAD = () => {
     const rctx = new AudioContext();
     const ranalyser = rctx.createAnalyser();
     ranalyser.fftSize = 512;
+
     const rstream = new MediaStream([track.mediaStreamTrack]);
     const rsrc = rctx.createMediaStreamSource(rstream);
     rsrc.connect(ranalyser);
-    remoteCtxRef.current = rctx;
-    remoteAnalyserRef.current = ranalyser;
 
     const rbuf = new Uint8Array(ranalyser.frequencyBinCount);
 
-    const R_ALPHA = 0.25;
-    const R_THR = 5.0;
-    const R_SILENCE_MS = 300;
-    let rema = 0;
+    // Thresholds for TTS (clean signal)
+    const REM_SPEAK_THR = 5;     // avatar speaking if avg > 5
+    const REM_SILENCE_MS = 300;  // debounce for falling edge
+
     let silenceTimer: number | null = null;
 
     const rloop = () => {
-      const avg = getAvg(ranalyser, rbuf);
-      rema = R_ALPHA * avg + (1 - R_ALPHA) * rema;
-      const speaking = rema > R_THR;
+      const avg = avgAmplitude(ranalyser, rbuf);
+      const speaking = avg > REM_SPEAK_THR;
 
+      // Rising edge: avatar started → compute latency
       if (speaking && !remoteSpeakingRef.current) {
         remoteSpeakingRef.current = true;
-        const now = Date.now();
-        const FRESH_MIN = 300;
-        const FRESH_MAX = 7000;
-        const fresh = [...eosQueueRef.current]
-          .filter((t) => now - t >= FRESH_MIN && now - t <= FRESH_MAX)
-          .sort((a, b) => b - a)[0];
-
-        if (fresh) {
-          recordLatencyFromMarker(fresh);
-          eosQueueRef.current = eosQueueRef.current.filter((t) => t > fresh && now - t <= 10_000);
-        } else {
-          console.log('ℹ️ Avatar started but no fresh EoS marker in 0.3–7s window.');
-        }
+        computeAndRecordLatency();
+        // console.log('[R-VAD] Avatar speaking… avg=', avg.toFixed(2));
       }
 
+      // Falling edge: debounce
       if (!speaking && remoteSpeakingRef.current) {
         if (silenceTimer === null) {
           silenceTimer = window.setTimeout(() => {
             remoteSpeakingRef.current = false;
             silenceTimer = null;
-          }, R_SILENCE_MS);
+          }, REM_SILENCE_MS);
         }
       } else if (speaking && silenceTimer !== null) {
         clearTimeout(silenceTimer);
@@ -232,23 +217,28 @@ export const ConversationLatencyVAD = () => {
 
     remoteRAFRef.current = requestAnimationFrame(rloop);
 
+    // Hidden <audio> keeps the media graph active on some browsers
     const audioEl = track.attach();
     audioEl.muted = true;
     audioEl.style.display = 'none';
     document.body.appendChild(audioEl);
 
+    // Cleanup for this attachment
     remoteCleanupRef.current = () => {
       if (remoteRAFRef.current) cancelAnimationFrame(remoteRAFRef.current);
       if (silenceTimer !== null) clearTimeout(silenceTimer);
       track.detach(audioEl);
       audioEl.remove();
       rctx.close().catch(() => undefined);
-      remoteCtxRef.current = null;
       remoteAnalyserRef.current = null;
+      remoteCtxRef.current = null;
     };
+
+    remoteAnalyserRef.current = ranalyser;
+    remoteCtxRef.current = rctx;
   };
 
-  // Scan existing tracks (mid-call join)
+  // Scan existing tracks in case we joined mid-call
   useEffect(() => {
     if (!room) return;
     room.remoteParticipants.forEach((rp: RemoteParticipant) => {
@@ -260,13 +250,17 @@ export const ConversationLatencyVAD = () => {
       });
     });
     return () => {
-      if (remoteCleanupRef.current) remoteCleanupRef.current();
+      if (remoteCleanupRef.current) {
+        remoteCleanupRef.current();
+        remoteCleanupRef.current = null;
+      }
     };
   }, [room, remoteParticipants.length]);
 
-  // Attach when avatar audio subscribes
+  // Attach when the avatar audio actually subscribes
   useEffect(() => {
     if (!room) return;
+
     const onTrackSubscribed = (
       track: any,
       publication: RemoteTrackPublication,
@@ -277,13 +271,16 @@ export const ConversationLatencyVAD = () => {
         attachRemoteVAD(track as RemoteAudioTrack);
       }
     };
+
     room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
-    return () => room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    return () => {
+      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    };
   }, [room]);
 
   if (!mounted) return null;
 
-  /* ---------------- Overlay ---------------- */
+  /* ---------------------- Overlay ---------------------- */
   return createPortal(
     <div
       className="
