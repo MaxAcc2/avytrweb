@@ -41,7 +41,7 @@ export const SessionView = ({
   const room = useRoomContext();
 
   // 👇 NEW state for listening hint
-  const [showListeningHint, setShowListeningHint] = useState(true);
+  const [showListeningHint, setShowListeningHint] = useState(false);
 
   useDebugMode({
     enabled: process.env.NODE_ENV !== 'production',
@@ -85,6 +85,29 @@ export const SessionView = ({
       return () => clearTimeout(timeout);
     }
   }, [agentState, sessionStarted, room]);
+
+  // 👇 Show "Listening..." only after avatar video is visible
+  useEffect(() => {
+    const checkVideoReady = () => {
+      const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
+        Array.from(p.videoTracks.values()).some(
+          (t) => t.track && t.track.isMuted === false
+        )
+      );
+      if (hasRemoteVideo) {
+        setShowListeningHint(true);
+      }
+    };
+
+    room.on('trackSubscribed', checkVideoReady);
+    room.on('participantConnected', checkVideoReady);
+    checkVideoReady();
+
+    return () => {
+      room.off('trackSubscribed', checkVideoReady);
+      room.off('participantConnected', checkVideoReady);
+    };
+  }, [room]);
 
   // 👇 Delay hiding the hint for 2s after first message arrives
   useEffect(() => {
@@ -154,7 +177,7 @@ export const SessionView = ({
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{
-                  opacity: sessionStarted && showListeningHint ? 1 : 0,
+                  opacity: showListeningHint ? 1 : 0,
                   transition: {
                     ease: 'easeIn',
                     duration: 0.5,
@@ -163,7 +186,7 @@ export const SessionView = ({
                 aria-hidden={!showListeningHint}
                 className={cn(
                   'absolute inset-x-0 -top-12 text-center',
-                  sessionStarted && showListeningHint && 'pointer-events-none'
+                  showListeningHint && 'pointer-events-none'
                 )}
               >
                 <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
@@ -182,6 +205,7 @@ export const SessionView = ({
           <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>
+
       {/* ✅ Add latency overlay */}
       {sessionStarted && <ConversationLatencyVAD />}
     </section>
