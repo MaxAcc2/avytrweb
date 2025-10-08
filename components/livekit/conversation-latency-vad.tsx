@@ -8,51 +8,55 @@ import {
   type AgentState,
 } from '@livekit/components-react';
 import type { LocalTrackPublication } from 'livekit-client';
-import { Track } from 'livekit-client';
+import { RoomState, Track } from 'livekit-client';
 
 /**
- * Conversation latency overlay
- * Latency = time from local End-of-Speech (EoS) on the SAME LiveKit mic track
- *           to when the agent state flips to 'speaking' (TTS begins).
+ * Latency = local End-of-Speech (on the SAME LiveKit mic track)
+ *           → agent state flips to 'speaking' (TTS begins).
  *
- * Why this is more accurate & stable:
- *  - EoS is measured on the exact mic track LiveKit publishes (no second getUserMedia).
- *  - Avatar "start" is taken from the assistant state transition, not raw audio frames.
- *  - EMA smoothing + minimum speaking duration + refractory period removes micro-pauses.
+ * Gated: does nothing until room is connected.
+ * Smoothed: EMA + min speaking duration + refractory to avoid micro-pauses.
  */
 
 export const ConversationLatencyVAD = () => {
   const room = useRoomContext();
   const { state: agentState } = useVoiceAssistant();
 
+  // ---- tuneables (if numbers feel off, adjust here) ----
+  const VAD_ALPHA = 0.2;         // EMA smoothing
+  const VAD_SPEAK_THR = 3.0;     // EMA > thr => speaking
+  const VAD_MIN_SPEAK_MS = 600;  // must speak at least this long to accept EoS
+  const VAD_SILENCE_MS = 450;    // sustained silence to confirm EoS
+  const VAD_REFRACT_MS = 1200;   // block double EoS after one fires
+
+  // Pairing window (match EoS to 'speaking' flip)
+  const PAIR_MIN_AGE = 250;      // ignore markers <250ms old (spurious)
+  const PAIR_MAX_AGE = 6000;     // cap at 6s to avoid stale long latencies
+
   const [mounted, setMounted] = useState(false);
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
 
-  // ----- Local VAD state -----
+  // Local VAD refs
   const isSpeakingRef = useRef(false);
   const speakStartRef = useRef<number | null>(null);
   const lastEosRef = useRef<number | null>(null);
-  const eosQueueRef = useRef<number[]>([]); // recent, deduped EoS markers
+  const eosQueueRef = useRef<number[]>([]);
 
-  // WebAudio refs for local VAD
-  const localCtxRef = useRef<AudioContext | null>(null);
-  const localAnalyserRef = useRef<AnalyserNode | null>(null);
   const localRAFRef = useRef<number | null>(null);
   const localSilenceTimerRef = useRef<number | null>(null);
+  const localCtxRef = useRef<AudioContext | null>(null);
+  const localAnalyserRef = useRef<AnalyserNode | null>(null);
 
   // Stats
   const historyRef = useRef<number[]>([]);
   const prevAgentStateRef = useRef<AgentState | null>(null);
 
   useEffect(() => setMounted(true), []);
+  const isConnected = room?.state === RoomState.Connected;
+  const clearTimer = (id: number | null) => { if (id !== null) window.clearTimeout(id); };
 
-  // Small helpers
-  const clearTimer = (id: number | null) => {
-    if (id !== null) window.clearTimeout(id);
-  };
-
-  // TS compat cast for DOM lib differences (Edge/Node types)
+  // TS compat for DOM typings
   const getAvg = (analyser: AnalyserNode, buf: Uint8Array) => {
     (analyser as any).getByteFrequencyData(buf as any);
     let s = 0;
@@ -60,11 +64,11 @@ export const ConversationLatencyVAD = () => {
     return s / buf.length;
   };
 
-  /* ---------------- Local VAD on SAME LiveKit mic track ---------------- */
-
-  const localPubsSize = room?.localParticipant?.trackPublications.size ?? 0;
+  /* ---------------- Local VAD on the SAME mic track ---------------- */
+  const localPubsSize = isConnected ? (room?.localParticipant?.trackPublications.size ?? 0) : 0;
 
   useEffect(() => {
+    if (!isConnected) return;
     const lp = room?.localParticipant;
     if (!lp) return;
 
@@ -74,12 +78,10 @@ export const ConversationLatencyVAD = () => {
       pubs.find((p) => `${p.source}`.toLowerCase().includes('microphone'));
 
     if (!micPub || !micPub.track || !('mediaStreamTrack' in micPub.track)) {
-      // eslint-disable-next-line no-console
-      console.log('⚠️ No local audio track yet for VAD; will retry.');
+      // wait for mic publication
       return;
     }
 
-    // Build analyser from the *same* MediaStreamTrack LiveKit publishes
     const mediaStream = new MediaStream([micPub.track.mediaStreamTrack]);
     const ctx = new AudioContext();
     const analyser = ctx.createAnalyser();
@@ -91,22 +93,14 @@ export const ConversationLatencyVAD = () => {
     localAnalyserRef.current = analyser;
 
     const buf = new Uint8Array(analyser.frequencyBinCount);
-
-    // Tunables (stable defaults)
-    const ALPHA = 0.2;          // EMA smoothing
-    const SPEAK_THR = 3.0;      // EMA > threshold => speaking
-    const MIN_SPEAK_MS = 600;   // must speak at least this long to allow EoS
-    const SILENCE_MS = 400;     // sustained silence to confirm EoS
-    const EoS_REFRACT_MS = 1200; // block double EoS events
-
     let ema = 0;
 
     const loop = () => {
       const avg = getAvg(analyser, buf);
-      ema = ALPHA * avg + (1 - ALPHA) * ema;
-      const speaking = ema > SPEAK_THR;
+      ema = VAD_ALPHA * avg + (1 - VAD_ALPHA) * ema;
+      const speaking = ema > VAD_SPEAK_THR;
 
-      // Rising edge → started speaking
+      // rising edge
       if (speaking && !isSpeakingRef.current) {
         isSpeakingRef.current = true;
         speakStartRef.current = Date.now();
@@ -114,7 +108,7 @@ export const ConversationLatencyVAD = () => {
         localSilenceTimerRef.current = null;
       }
 
-      // Falling edge → schedule EoS after sustained silence
+      // falling edge → schedule EoS after sustained silence
       if (!speaking && isSpeakingRef.current) {
         if (localSilenceTimerRef.current === null) {
           localSilenceTimerRef.current = window.setTimeout(() => {
@@ -123,20 +117,18 @@ export const ConversationLatencyVAD = () => {
             const spokeFor = now - started;
             const sinceLast = lastEosRef.current ? now - lastEosRef.current : Infinity;
 
-            if (spokeFor >= MIN_SPEAK_MS && sinceLast >= EoS_REFRACT_MS) {
-              // accept EoS marker
+            if (spokeFor >= VAD_MIN_SPEAK_MS && sinceLast >= VAD_REFRACT_MS) {
               eosQueueRef.current.push(now);
-              // keep only recent markers (≤ 12s)
+              // keep ≤12s of markers
               eosQueueRef.current = eosQueueRef.current.filter((t) => now - t <= 12_000);
               lastEosRef.current = now;
-              // eslint-disable-next-line no-console
-              console.log('[VAD] User stopped talking at', now, `(spoke ${spokeFor}ms)`);
+              // console.log('[VAD] EoS @', now, `(spoke ${spokeFor}ms)`);
             }
 
             isSpeakingRef.current = false;
             speakStartRef.current = null;
             localSilenceTimerRef.current = null;
-          }, SILENCE_MS);
+          }, VAD_SILENCE_MS);
         }
       }
 
@@ -153,21 +145,19 @@ export const ConversationLatencyVAD = () => {
       localCtxRef.current = null;
       localAnalyserRef.current = null;
     };
-  }, [room, localPubsSize]);
+  }, [isConnected, room, localPubsSize]);
 
-  /* --------- Compute latency on agent state flip to 'speaking' --------- */
-
+  /* -------- Compute latency on agent state → 'speaking' -------- */
   useEffect(() => {
+    if (!isConnected) return;
+
     const prev = prevAgentStateRef.current;
-    // Transition into speaking = avatar starts TTS playback
     if (prev !== 'speaking' && agentState === 'speaking') {
       const now = Date.now();
-      // Pair with the most recent EoS that’s plausibly from this turn
-      // window: 0.25s .. 8s before speaking
-      const MIN_AGE = 250;
-      const MAX_AGE = 8000;
+
+      // use the most recent EoS in [PAIR_MIN_AGE, PAIR_MAX_AGE]
       const marker = [...eosQueueRef.current]
-        .filter((t) => now - t >= MIN_AGE && now - t <= MAX_AGE)
+        .filter((t) => now - t >= PAIR_MIN_AGE && now - t <= PAIR_MAX_AGE)
         .sort((a, b) => b - a)[0];
 
       if (marker) {
@@ -179,35 +169,23 @@ export const ConversationLatencyVAD = () => {
           historyRef.current.reduce((a, b) => a + b, 0) / historyRef.current.length;
         setAverageLatency(avg);
 
-        // Drop used + stale markers
+        // drop used + stale
         eosQueueRef.current = eosQueueRef.current.filter((t) => t > marker && now - t <= 12_000);
-
-        // eslint-disable-next-line no-console
-        console.log(
-          `🕒 Conversation latency: ${latency} ms (avg ${avg.toFixed(0)} ms)`
-        );
+        // console.log(`🕒 Latency ${latency} ms (avg ${avg.toFixed(0)} ms)`);
       } else {
-        // eslint-disable-next-line no-console
-        console.log('ℹ️ Agent started speaking but no fresh local EoS in 0.25–8s window.');
+        // console.log('No fresh EoS in window; adjust thresholds if this repeats.');
       }
     }
 
     prevAgentStateRef.current = agentState;
-  }, [agentState]);
+  }, [isConnected, agentState]);
 
-  if (!mounted) return null;
+  if (!mounted || !isConnected) return null;
 
-  /* ---------------- Overlay ---------------- */
   return createPortal(
-    <div
-      className="
-        fixed bottom-6 right-6 z-[99999]
-        bg-white text-black text-sm font-mono
-        px-4 py-2 rounded-lg shadow-lg border border-black/20
-      "
-    >
+    <div className="fixed bottom-6 right-6 z-[99999] bg-white text-black text-sm font-mono px-4 py-2 rounded-lg shadow-lg border border-black/20">
       {latestLatency === null ? (
-        <span>Waiting for avatar audio...</span>
+        <span>Waiting…</span>
       ) : (
         <>
           <div>Last: {latestLatency} ms</div>
