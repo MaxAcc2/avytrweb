@@ -2,59 +2,59 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRoomContext } from '@livekit/components-react';
-import type { LocalTrackPublication, RemoteParticipant } from 'livekit-client';
-import { RoomEvent, ParticipantEvent, RoomState, Track } from 'livekit-client';
+import {
+  useRoomContext,
+  useVoiceAssistant,
+  type AgentState,
+} from '@livekit/components-react';
+import type { LocalTrackPublication } from 'livekit-client';
+import { Track } from 'livekit-client';
 
 /**
- * Latency = (performance.now at local End-of-Speech on SAME mic track)
- *           to (performance.now at remote participant speaking rising-edge).
+ * Conversation latency overlay
+ * Measures time between user's end-of-speech (EoS) and
+ * the assistant beginning to speak (TTS start).
  *
- * No agent state heuristics, no remote VAD math—just two timestamps and a subtraction.
+ * Simplified version:
+ *  - Uses the same LiveKit mic track for VAD detection.
+ *  - EoS timestamps are taken immediately (no extra silence delay).
+ *  - Uses performance.now() for sub-millisecond precision.
  */
 
 export const ConversationLatencyVAD = () => {
   const room = useRoomContext();
+  const { state: agentState } = useVoiceAssistant();
 
-  // ---- UI state
   const [mounted, setMounted] = useState(false);
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
 
-  // ---- Local VAD (mic) refs
+  // Refs for VAD and tracking
   const isSpeakingRef = useRef(false);
-  const speakStartMsRef = useRef<number | null>(null);
-  const eosMsRef = useRef<number | null>(null);            // <-- marker we pair
-  const rafRef = useRef<number | null>(null);
-  const silenceTimerRef = useRef<number | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  // ---- Remote speaking detection refs
-  const attachedParticipantSidsRef = useRef<Set<string>>(new Set());
-
-  // ---- Stats
+  const lastEosRef = useRef<number | null>(null);
+  const eosQueueRef = useRef<number[]>([]);
   const historyRef = useRef<number[]>([]);
+  const prevAgentStateRef = useRef<AgentState | null>(null);
+
+  // WebAudio refs
+  const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => setMounted(true), []);
 
-  const isConnected = room?.state === RoomState.Connected;
-  const clearTimer = (t: number | null) => { if (t !== null) window.clearTimeout(t); };
-
-  // Small helper to read energy (cast avoids DOM typing mismatch)
-  const avg = (analyser: AnalyserNode, buf: Uint8Array) => {
+  const getAvg = (analyser: AnalyserNode, buf: Uint8Array) => {
     (analyser as any).getByteFrequencyData(buf as any);
     let s = 0;
     for (let i = 0; i < buf.length; i++) s += buf[i];
     return s / buf.length;
   };
 
-  /* ------------------------- Local VAD on SAME mic track ------------------------- */
-  const localPubsSize = isConnected ? (room?.localParticipant?.trackPublications.size ?? 0) : 0;
+  /* ---------------- Local VAD on SAME LiveKit mic track ---------------- */
+
+  const localPubsSize = room?.localParticipant?.trackPublications.size ?? 0;
 
   useEffect(() => {
-    if (!isConnected) return;
-
     const lp = room?.localParticipant;
     if (!lp) return;
 
@@ -64,64 +64,58 @@ export const ConversationLatencyVAD = () => {
       pubs.find((p) => `${p.source}`.toLowerCase().includes('microphone'));
 
     if (!micPub || !micPub.track || !('mediaStreamTrack' in micPub.track)) {
-      // wait for mic publication
+      console.log('⚠️ No local audio track yet for VAD; will retry.');
       return;
     }
 
-    // Build an analyser on the SAME media track LiveKit publishes
-    const stream = new MediaStream([micPub.track.mediaStreamTrack]);
+    const mediaStream = new MediaStream([micPub.track.mediaStreamTrack]);
     const ctx = new AudioContext();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
-    const src = ctx.createMediaStreamSource(stream);
+    const src = ctx.createMediaStreamSource(mediaStream);
     src.connect(analyser);
+
+    ctxRef.current = ctx;
     analyserRef.current = analyser;
-    audioCtxRef.current = ctx;
 
     const buf = new Uint8Array(analyser.frequencyBinCount);
 
-    // Simple, robust thresholds (tune if needed for your mic)
-    const EMA_A = 0.2;       // smoothing
-    const SPEAK_THR = 3.0;   // above => speaking
-    const SILENCE_MS = 450;  // sustained silence to mark EoS
-    const MIN_SPEAK_MS = 500;// must speak at least this long
-    const REFRACT_MS = 1200; // block double EoS for a bit
+    // Tunables
+    const ALPHA = 0.2; // EMA smoothing
+    const SPEAK_THR = 3.0; // EMA > threshold => speaking
+    const MIN_SPEAK_MS = 400; // must speak this long to count as valid
+    const EoS_REFRACT_MS = 1000; // prevent double-triggering within 1s
 
     let ema = 0;
+    let speakStart: number | null = null;
 
     const loop = () => {
-      const val = avg(analyser, buf);
-      ema = EMA_A * val + (1 - EMA_A) * ema;
+      const avg = getAvg(analyser, buf);
+      ema = ALPHA * avg + (1 - ALPHA) * ema;
       const speaking = ema > SPEAK_THR;
+      const now = performance.now();
 
-      // rising edge
+      // Rising edge → speaking start
       if (speaking && !isSpeakingRef.current) {
         isSpeakingRef.current = true;
-        speakStartMsRef.current = performance.now();
-        clearTimer(silenceTimerRef.current);
-        silenceTimerRef.current = null;
+        speakStart = now;
       }
 
-      // falling edge → schedule EoS after sustained quiet
+      // Falling edge → possible end of speech (EoS)
       if (!speaking && isSpeakingRef.current) {
-        if (silenceTimerRef.current === null) {
-          silenceTimerRef.current = window.setTimeout(() => {
-            const now = performance.now();
-            const started = speakStartMsRef.current ?? now;
-            const spokeFor = now - started;
-            const last = eosMsRef.current;
+        const spokeFor = speakStart ? now - speakStart : 0;
+        const sinceLast = lastEosRef.current ? now - lastEosRef.current : Infinity;
 
-            // accept one EoS per turn-ish
-            if (spokeFor >= MIN_SPEAK_MS && (!last || now - last >= REFRACT_MS)) {
-              eosMsRef.current = now;                // <-- our marker
-              // console.log('[EoS]', Math.round(now));
-            }
-
-            isSpeakingRef.current = false;
-            speakStartMsRef.current = null;
-            silenceTimerRef.current = null;
-          }, SILENCE_MS);
+        if (spokeFor >= MIN_SPEAK_MS && sinceLast >= EoS_REFRACT_MS) {
+          // Mark immediate EoS timestamp (no extra silence delay)
+          eosQueueRef.current.push(now);
+          eosQueueRef.current = eosQueueRef.current.filter((t) => now - t <= 12000);
+          lastEosRef.current = now;
+          console.log('[VAD] EoS detected at', now.toFixed(1));
         }
+
+        isSpeakingRef.current = false;
+        speakStart = null;
       }
 
       rafRef.current = requestAnimationFrame(loop);
@@ -131,88 +125,67 @@ export const ConversationLatencyVAD = () => {
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      clearTimer(silenceTimerRef.current);
-      silenceTimerRef.current = null;
       ctx.close().catch(() => undefined);
+      ctxRef.current = null;
       analyserRef.current = null;
-      audioCtxRef.current = null;
     };
-  }, [isConnected, room, localPubsSize]);
+  }, [room, localPubsSize]);
 
-  /* -------------------- Remote start via IsSpeakingChanged (rising) -------------------- */
+  /* --------- Compute latency on agent state flip to 'speaking' --------- */
 
-  // Attach to current remote participants and future joins
   useEffect(() => {
-    if (!isConnected || !room) return;
+    const prev = prevAgentStateRef.current;
 
-    const onParticipant = (rp: RemoteParticipant) => {
-      if (attachedParticipantSidsRef.current.has(rp.sid)) return;
-      attachedParticipantSidsRef.current.add(rp.sid);
+    if (prev !== 'speaking' && agentState === 'speaking') {
+      const now = performance.now();
 
-      const handler = () => {
-        if (rp.isSpeaking) {
-          const marker = eosMsRef.current;
-          if (marker != null) {
-            const now = performance.now();
-            const delta = now - marker;        // <-- pure subtraction
-            historyRef.current.push(delta);
-            setLatestLatency(Math.round(delta));
-            const avgVal =
-              historyRef.current.reduce((a, b) => a + b, 0) / historyRef.current.length;
-            setAverageLatency(avgVal);
-            eosMsRef.current = null;           // consume marker; 1:1 pairing
-            // console.log('[Start]', Math.round(now), 'Δ', Math.round(delta));
-          }
-        }
-      };
+      // find most recent EoS within 0.25–8s before now
+      const MIN_AGE = 250;
+      const MAX_AGE = 8000;
+      const marker = [...eosQueueRef.current]
+        .filter((t) => now - t >= MIN_AGE && now - t <= MAX_AGE)
+        .sort((a, b) => b - a)[0];
 
-      rp.on(ParticipantEvent.IsSpeakingChanged, handler);
+      if (marker) {
+        const latency = now - marker;
+        historyRef.current.push(latency);
+        setLatestLatency(latency);
 
-      // cleanup
-      return () => {
-        rp.off(ParticipantEvent.IsSpeakingChanged, handler);
-        attachedParticipantSidsRef.current.delete(rp.sid);
-      };
-    };
+        const avg =
+          historyRef.current.reduce((a, b) => a + b, 0) / historyRef.current.length;
+        setAverageLatency(avg);
 
-    // attach to existing
-    room.remoteParticipants.forEach((rp) => onParticipant(rp));
+        eosQueueRef.current = eosQueueRef.current.filter(
+          (t) => t > marker && now - t <= 12000
+        );
 
-    // attach to future
-    const onConnected = (rp: RemoteParticipant) => onParticipant(rp);
-    const onDisconnected = (rp: RemoteParticipant) => {
-      // ensure we remove any listener left
-      if (attachedParticipantSidsRef.current.has(rp.sid)) {
-        rp.removeAllListeners(ParticipantEvent.IsSpeakingChanged);
-        attachedParticipantSidsRef.current.delete(rp.sid);
+        console.log(`🕒 Conversation latency: ${latency.toFixed(1)} ms (avg ${avg.toFixed(0)} ms)`);
+      } else {
+        console.log('ℹ️ Agent started speaking but no recent EoS found (0.25–8s window).');
       }
-    };
+    }
 
-    room.on(RoomEvent.ParticipantConnected, onConnected);
-    room.on(RoomEvent.ParticipantDisconnected, onDisconnected);
+    prevAgentStateRef.current = agentState;
+  }, [agentState]);
 
-    return () => {
-      room.off(RoomEvent.ParticipantConnected, onConnected);
-      room.off(RoomEvent.ParticipantDisconnected, onDisconnected);
-      // best-effort bulk cleanup
-      room.remoteParticipants.forEach((rp) => {
-        rp.removeAllListeners(ParticipantEvent.IsSpeakingChanged);
-        attachedParticipantSidsRef.current.delete(rp.sid);
-      });
-    };
-  }, [isConnected, room]);
+  if (!mounted) return null;
 
-  if (!mounted || !isConnected) return null;
-
+  /* ---------------- Overlay ---------------- */
   return createPortal(
-    <div className="fixed bottom-6 right-6 z-[99999] bg-white text-black text-sm font-mono px-4 py-2 rounded-lg shadow-lg border border-black/20">
+    <div
+      className="
+        fixed bottom-6 right-6 z-[99999]
+        bg-white text-black text-sm font-mono
+        px-4 py-2 rounded-lg shadow-lg border border-black/20
+      "
+    >
       {latestLatency === null ? (
-        <span>Waiting…</span>
+        <span>Waiting for avatar audio...</span>
       ) : (
         <>
-          <div>Last: {latestLatency} ms</div>
+          <div>Last: {latestLatency.toFixed(1)} ms</div>
           {typeof averageLatency === 'number' && (
-            <div className="text-gray-700">Avg: {Math.round(averageLatency)} ms</div>
+            <div className="text-gray-700">Avg: {averageLatency.toFixed(0)} ms</div>
           )}
         </>
       )}
