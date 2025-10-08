@@ -4,13 +4,9 @@ import { cn } from '@/lib/utils';
 import { useChatMessage } from './hooks/utils';
 
 export interface ChatEntryProps extends React.HTMLAttributes<HTMLLIElement> {
-  /** The chat message object to display. */
   entry: ReceivedChatMessage;
-  /** Hide sender name. Useful when displaying multiple consecutive chat messages from the same person. */
   hideName?: boolean;
-  /** Hide message timestamp. */
   hideTimestamp?: boolean;
-  /** An optional formatter for the message body. */
   messageFormatter?: MessageFormatter;
 }
 
@@ -31,14 +27,12 @@ export const ChatEntry = ({
     <li
       data-lk-message-origin={messageOrigin}
       title={time.toLocaleTimeString(locale, { timeStyle: 'full' })}
-      // 👇 removed gap and tightened spacing
-      className={cn('group flex flex-col', className)}
+      className={cn('group flex flex-col !gap-0', className)}
       {...props}
     >
       {(!hideTimestamp || !hideName || hasBeenEdited) && (
-        <span className="text-muted-foreground flex text-sm leading-tight">
+        <span className="text-muted-foreground flex text-sm !leading-tight">
           {!hideName && <strong className="font-medium">{name}</strong>}
-
           {!hideTimestamp && (
             <span className="align-self-end ml-auto font-mono text-xs opacity-0 transition-opacity ease-linear group-hover:opacity-100">
               {hasBeenEdited && '*'}
@@ -50,8 +44,7 @@ export const ChatEntry = ({
 
       <span
         className={cn(
-          // 👇 tighter line height and no margin
-          'max-w-4/5 rounded-[20px] p-2 leading-tight !my-0',
+          'max-w-4/5 rounded-[20px] p-2 !leading-[1.15] !my-0',
           isUser ? 'bg-muted ml-auto' : 'mr-auto'
         )}
       >

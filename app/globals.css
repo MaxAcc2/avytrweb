@@ -245,3 +245,27 @@
     }
   }
 }
+
+@layer components {
+  /* Tighten spacing ONLY in chat entries */
+  [data-lk-message-origin] {
+    gap: 0 !important;                        /* kill column gap between meta + bubble */
+  }
+
+  /* Meta row (name/timestamp) */
+  [data-lk-message-origin] > span {
+    line-height: 1.15 !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* Message bubble & any nested text/markdown */
+  [data-lk-message-origin] > span,
+  [data-lk-message-origin] p,
+  [data-lk-message-origin] li,
+  [data-lk-message-origin] div {
+    line-height: 1.15 !important;             /* ~leading-tight */
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+}
