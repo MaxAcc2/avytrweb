@@ -268,3 +268,20 @@
     margin-bottom: 0 !important;
   }
 }
+
+/* Alternate white / gray chat bubbles for better readability */
+[data-lk-message-origin] span {
+  transition: background-color 0.3s ease;
+}
+
+/* Odd-numbered chat entries → white bubble */
+[data-lk-message-origin]:nth-of-type(odd) span {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+}
+
+/* Even-numbered chat entries → light gray bubble */
+[data-lk-message-origin]:nth-of-type(even) span {
+  background-color: #f2f2f2 !important;
+  color: #000000 !important;
+}
