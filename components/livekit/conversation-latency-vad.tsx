@@ -12,13 +12,14 @@ import { Track } from 'livekit-client';
 
 /**
  * Conversation latency overlay
- * Measures time between user's end-of-speech (EoS) and
- * the assistant beginning to speak (TTS start).
+ * Measures time between user's end-of-speech (EoS)
+ * and assistant beginning to speak (TTS start).
  *
- * Simplified version:
- *  - Uses the same LiveKit mic track for VAD detection.
- *  - EoS timestamps are taken immediately (no extra silence delay).
- *  - Uses performance.now() for sub-millisecond precision.
+ * Improvements:
+ *  - Uses performance.now() for high precision.
+ *  - EoS marked immediately when energy drops below threshold
+ *    (no delayed silence confirmation).
+ *  - Tightened pairing window prevents stale markers.
  */
 
 export const ConversationLatencyVAD = () => {
@@ -29,14 +30,13 @@ export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
 
-  // Refs for VAD and tracking
+  // Refs
   const isSpeakingRef = useRef(false);
   const lastEosRef = useRef<number | null>(null);
   const eosQueueRef = useRef<number[]>([]);
   const historyRef = useRef<number[]>([]);
   const prevAgentStateRef = useRef<AgentState | null>(null);
 
-  // WebAudio refs
   const ctxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -83,8 +83,8 @@ export const ConversationLatencyVAD = () => {
     // Tunables
     const ALPHA = 0.2; // EMA smoothing
     const SPEAK_THR = 3.0; // EMA > threshold => speaking
-    const MIN_SPEAK_MS = 400; // must speak this long to count as valid
-    const EoS_REFRACT_MS = 1000; // prevent double-triggering within 1s
+    const MIN_SPEAK_MS = 300; // must speak at least this long to count
+    const EoS_REFRACT_MS = 1000; // ignore EoS if one fired recently
 
     let ema = 0;
     let speakStart: number | null = null;
@@ -95,23 +95,22 @@ export const ConversationLatencyVAD = () => {
       const speaking = ema > SPEAK_THR;
       const now = performance.now();
 
-      // Rising edge → speaking start
+      // Rising edge → start speaking
       if (speaking && !isSpeakingRef.current) {
         isSpeakingRef.current = true;
         speakStart = now;
       }
 
-      // Falling edge → possible end of speech (EoS)
+      // Falling edge → early EoS detection
       if (!speaking && isSpeakingRef.current) {
         const spokeFor = speakStart ? now - speakStart : 0;
         const sinceLast = lastEosRef.current ? now - lastEosRef.current : Infinity;
 
         if (spokeFor >= MIN_SPEAK_MS && sinceLast >= EoS_REFRACT_MS) {
-          // Mark immediate EoS timestamp (no extra silence delay)
           eosQueueRef.current.push(now);
           eosQueueRef.current = eosQueueRef.current.filter((t) => now - t <= 12000);
           lastEosRef.current = now;
-          console.log('[VAD] EoS detected at', now.toFixed(1));
+          console.log('[VAD] Early EoS detected at', now.toFixed(1));
         }
 
         isSpeakingRef.current = false;
@@ -139,9 +138,10 @@ export const ConversationLatencyVAD = () => {
     if (prev !== 'speaking' && agentState === 'speaking') {
       const now = performance.now();
 
-      // find most recent EoS within 0.25–8s before now
-      const MIN_AGE = 250;
-      const MAX_AGE = 8000;
+      // tighter window: 50ms – 3s
+      const MIN_AGE = 50;
+      const MAX_AGE = 3000;
+
       const marker = [...eosQueueRef.current]
         .filter((t) => now - t >= MIN_AGE && now - t <= MAX_AGE)
         .sort((a, b) => b - a)[0];
@@ -161,7 +161,7 @@ export const ConversationLatencyVAD = () => {
 
         console.log(`🕒 Conversation latency: ${latency.toFixed(1)} ms (avg ${avg.toFixed(0)} ms)`);
       } else {
-        console.log('ℹ️ Agent started speaking but no recent EoS found (0.25–8s window).');
+        console.log('ℹ️ Agent started speaking but no recent EoS found (0.05–3s window).');
       }
     }
 
