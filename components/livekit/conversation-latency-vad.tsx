@@ -59,7 +59,6 @@ export const ConversationLatencyVAD = () => {
         };
 
         requestAnimationFrame(checkVolume);
-
         analyserRef.current = analyser;
         audioContextRef.current = audioContext;
       } catch (err) {
@@ -87,17 +86,20 @@ export const ConversationLatencyVAD = () => {
       return;
     }
 
-    console.log('✅ Found remote audio publication:', audioPub.trackSid);
-
     const track = audioPub.track as RemoteAudioTrack | undefined;
-
     if (!track) {
-      console.log('⚠️ Remote audio track not ready yet');
+      console.log('⚠️ Remote audio track not yet attached');
       return;
     }
 
-    const handleStarted = () => {
-      console.log('🎧 Remote audio started playing');
+    // Attach the track to an invisible <audio> element to monitor playback
+    const audioEl = track.attach();
+    audioEl.muted = true; // avoid echo
+    audioEl.style.display = 'none';
+    document.body.appendChild(audioEl);
+
+    const handlePlay = () => {
+      console.log('🎧 Remote audio element started playing');
       if (userEndTime) {
         const latencyMs = Date.now() - userEndTime;
         setLatestLatency(latencyMs);
@@ -114,10 +116,12 @@ export const ConversationLatencyVAD = () => {
       }
     };
 
-    track.on('started', handleStarted);
+    audioEl.addEventListener('play', handlePlay);
 
     return () => {
-      track.off('started', handleStarted);
+      audioEl.removeEventListener('play', handlePlay);
+      track.detach(audioEl);
+      audioEl.remove();
     };
   }, [remoteParticipants, userEndTime]);
 
