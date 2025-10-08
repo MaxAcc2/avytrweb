@@ -4,9 +4,13 @@ import { cn } from '@/lib/utils';
 import { useChatMessage } from './hooks/utils';
 
 export interface ChatEntryProps extends React.HTMLAttributes<HTMLLIElement> {
+  /** The chat message object to display. */
   entry: ReceivedChatMessage;
+  /** Hide sender name. Useful when displaying multiple consecutive chat messages from the same person. */
   hideName?: boolean;
+  /** Hide message timestamp. */
   hideTimestamp?: boolean;
+  /** An optional formatter for the message body. */
   messageFormatter?: MessageFormatter;
 }
 
@@ -31,8 +35,12 @@ export const ChatEntry = ({
       {...props}
     >
       {(!hideTimestamp || !hideName || hasBeenEdited) && (
-        <span className="text-muted-foreground flex text-sm !leading-tight">
+        <span
+          className="text-muted-foreground flex text-sm"
+          style={{ lineHeight: 1.15, marginTop: 0, marginBottom: 0 }}
+        >
           {!hideName && <strong className="font-medium">{name}</strong>}
+
           {!hideTimestamp && (
             <span className="align-self-end ml-auto font-mono text-xs opacity-0 transition-opacity ease-linear group-hover:opacity-100">
               {hasBeenEdited && '*'}
@@ -44,9 +52,12 @@ export const ChatEntry = ({
 
       <span
         className={cn(
-          'max-w-4/5 rounded-[20px] p-2 !leading-[1.15] !my-0',
+          // block + smaller vertical padding; keep decent horizontal padding
+          'block max-w-4/5 rounded-[20px] px-3 py-1 whitespace-pre-line',
           isUser ? 'bg-muted ml-auto' : 'mr-auto'
         )}
+        // 🔒 Hard override line-height so it can’t be reset elsewhere
+        style={{ lineHeight: 1.15, marginTop: 0, marginBottom: 0 }}
       >
         {message}
       </span>

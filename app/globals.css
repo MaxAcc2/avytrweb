@@ -245,7 +245,6 @@
     }
   }
 }
-
 @layer components {
   /* Tighten spacing ONLY in chat entries */
   [data-lk-message-origin] {
