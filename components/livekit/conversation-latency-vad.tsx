@@ -3,20 +3,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRemoteParticipants } from '@livekit/components-react';
-import type { RemoteTrackPublication } from 'livekit-client';
+import type { RemoteTrackPublication, RemoteAudioTrack } from 'livekit-client';
 
 /**
- * Measures latency between when the user stops speaking
- * (detected with Voice Activity Detection) and when
- * the remote avatar starts responding.
- * Always visible thanks to a React Portal.
+ * Measures latency between when the user stops speaking (VAD)
+ * and when the remote avatar begins playing audio.
  */
 export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
   const [userEndTime, setUserEndTime] = useState<number | null>(null);
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
-  const [mounted, setMounted] = useState(false); // for SSR safety
+  const [mounted, setMounted] = useState(false);
 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -24,10 +22,7 @@ export const ConversationLatencyVAD = () => {
   const latencyHistoryRef = useRef<number[]>([]);
   const remoteParticipants = useRemoteParticipants();
 
-  // --- Mount check for createPortal ---
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  useEffect(() => setMounted(true), []);
 
   // --- Voice Activity Detection (VAD) for local user ---
   useEffect(() => {
@@ -45,13 +40,12 @@ export const ConversationLatencyVAD = () => {
         const checkVolume = () => {
           analyser.getByteFrequencyData(dataArray);
           const avg = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
-          const speaking = avg > 15; // lower threshold for sensitivity
+          const speaking = avg > 15;
 
           if (speaking && !isUserSpeaking) {
             setIsUserSpeaking(true);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
           } else if (!speaking && isUserSpeaking) {
-            // sustained silence for 400 ms → user stopped talking
             if (!silenceTimerRef.current) {
               silenceTimerRef.current = setTimeout(() => {
                 setIsUserSpeaking(false);
@@ -88,9 +82,22 @@ export const ConversationLatencyVAD = () => {
       remote.trackPublications.values()
     ).find((pub) => pub.kind === 'audio');
 
-    if (!audioPub) return;
+    if (!audioPub) {
+      console.log('⚠️ No remote audio publication found');
+      return;
+    }
 
-    const handleSubscribed = () => {
+    console.log('✅ Found remote audio publication:', audioPub.trackSid);
+
+    const track = audioPub.track as RemoteAudioTrack | undefined;
+
+    if (!track) {
+      console.log('⚠️ Remote audio track not ready yet');
+      return;
+    }
+
+    const handleStarted = () => {
+      console.log('🎧 Remote audio started playing');
       if (userEndTime) {
         const latencyMs = Date.now() - userEndTime;
         setLatestLatency(latencyMs);
@@ -107,16 +114,16 @@ export const ConversationLatencyVAD = () => {
       }
     };
 
-    audioPub.on('subscribed', handleSubscribed);
+    track.on('started', handleStarted);
+
     return () => {
-      audioPub.off('subscribed', handleSubscribed);
+      track.off('started', handleStarted);
     };
   }, [remoteParticipants, userEndTime]);
 
-  // --- Render nothing on server ---
   if (!mounted) return null;
 
-  // --- Display overlay in a portal (always on top) ---
+  // --- Display overlay (portal) ---
   return createPortal(
     <div
       className="
