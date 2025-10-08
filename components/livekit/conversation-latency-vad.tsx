@@ -2,18 +2,25 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useRoomContext, useRemoteParticipants } from '@livekit/components-react';
+import {
+  useRoomContext,
+  useRemoteParticipants,
+} from '@livekit/components-react';
 import type {
   LocalTrackPublication,
-  RemoteParticipant,
   RemoteTrackPublication,
+  RemoteParticipant,
   RemoteAudioTrack,
+} from 'livekit-client';
+import {
+  RoomEvent,
+  Track,
 } from 'livekit-client';
 
 /**
  * Measures latency between:
  *  - when YOU stop speaking (VAD from the SAME local mic track LiveKit publishes)
- *  - when the AVATAR starts playing audio (via the remote audio element 'play' event)
+ *  - when the AVATAR starts playing audio (via remote audio element 'play' on TrackSubscribed)
  */
 export const ConversationLatencyVAD = () => {
   const room = useRoomContext();
@@ -30,18 +37,24 @@ export const ConversationLatencyVAD = () => {
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const latencyHistoryRef = useRef<number[]>([]);
 
+  // keep track of the currently attached remote audio element so we can clean up
+  const remoteAudioCleanupRef = useRef<(() => void) | null>(null);
+
   useEffect(() => setMounted(true), []);
 
   /* ------------------  VAD using the SAME local mic track  ------------------ */
-  const localPubsSize = room?.localParticipant?.trackPublications.size ?? 0;
+  const localPubsSize =
+    room?.localParticipant?.trackPublications.size ?? 0;
 
   useEffect(() => {
     const lp = room?.localParticipant;
     if (!lp) return;
 
     // Find the LOCAL mic publication LiveKit is actually using
-    const pubs: LocalTrackPublication[] = Array.from(lp.trackPublications.values()) as any;
-    const micPub = pubs.find((p) => p.kind === 'audio') || pubs.find((p) => `${p.source}`.includes('microphone'));
+    const pubs = Array.from(lp.trackPublications.values()) as LocalTrackPublication[];
+    const micPub =
+      pubs.find((p) => p.kind === Track.Kind.Audio) ||
+      pubs.find((p) => `${p.source}`.includes('microphone'));
 
     if (!micPub || !micPub.track || !('mediaStreamTrack' in micPub.track)) {
       console.log('⚠️ No local audio track yet for VAD; will retry.');
@@ -92,45 +105,21 @@ export const ConversationLatencyVAD = () => {
       cancelAnimationFrame(raf);
       ctx.close().catch(() => {});
     };
-    // Re-run when the set of local publications changes (e.g., mic turns on)
   }, [room, localPubsSize, isUserSpeaking]);
 
-  /* ------------------  Detect avatar playback (remote audio)  ------------------ */
-  const remotePubsKey = remoteParticipants
-    .map((p) => `${p.sid}:${p.trackPublications.size}`)
-    .join('|');
+  /* ------------------  Remote audio playback detection (event-based)  ------------------ */
 
-  useEffect(() => {
-    // pick first remote participant that has any tracks
-    const remote: RemoteParticipant | undefined = remoteParticipants.find(
-      (p) => p.trackPublications.size > 0
-    );
-    if (!remote) {
-      console.log('⚠️ No remote participant with tracks yet.');
-      return;
+  // Helper: attach to a RemoteAudioTrack and listen for <audio> 'play'
+  const attachPlaybackListener = (track: RemoteAudioTrack) => {
+    // cleanup any previous attachment
+    if (remoteAudioCleanupRef.current) {
+      remoteAudioCleanupRef.current();
+      remoteAudioCleanupRef.current = null;
     }
 
-    const pubs: RemoteTrackPublication[] = Array.from(remote.trackPublications.values()) as any;
-    console.log('🔍 Remote pubs found:', pubs.length, pubs.map((p) => p.source));
-
-    // Find any audio-like publication
-    const audioPub =
-      pubs.find((p) => p.kind === 'audio') ||
-      pubs.find((p) => `${p.source}`.includes('microphone')) ||
-      pubs.find((p) => !!p.track);
-
-    if (!audioPub || !audioPub.track) {
-      console.log('⚠️ No remote audio track yet, will re-check on next render');
-      return;
-    }
-
-    const track = audioPub.track as RemoteAudioTrack;
-    console.log('✅ Found remote audio track, attaching listener');
-
-    // Attach to an invisible <audio> to detect playback reliably
     const audioEl = track.attach();
-    audioEl.muted = true; // avoid double audio
-    audioEl.style.display = 'none';
+    audioEl.muted = true;            // avoid double audio
+    audioEl.style.display = 'none';  // hidden probe
     document.body.appendChild(audioEl);
 
     const handlePlay = () => {
@@ -145,21 +134,71 @@ export const ConversationLatencyVAD = () => {
           latencyHistoryRef.current.length;
         setAverageLatency(avg);
 
-        console.log(`🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`);
+        console.log(
+          `🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`
+        );
       } else {
-        // Fallback: show that avatar played but we had no VAD marker yet
         console.log('ℹ️ Avatar audio started but no VAD marker yet.');
       }
     };
 
     audioEl.addEventListener('play', handlePlay);
 
-    return () => {
+    // store cleanup
+    remoteAudioCleanupRef.current = () => {
       audioEl.removeEventListener('play', handlePlay);
       track.detach(audioEl);
       audioEl.remove();
     };
-  }, [remotePubsKey, userEndTime]);
+  };
+
+  // Effect A: try to attach to any already-subscribed remote audio tracks
+  useEffect(() => {
+    if (!room) return;
+
+    // scan all remote participants and their publications for an audio track
+    let attached = false;
+    room.remoteParticipants.forEach((rp: RemoteParticipant) => {
+      rp.trackPublications.forEach((pub: RemoteTrackPublication) => {
+        const t = pub.track;
+        if (t && pub.kind === Track.Kind.Audio) {
+          console.log('✅ Found existing subscribed remote audio track. Attaching.');
+          attachPlaybackListener(t as RemoteAudioTrack);
+          attached = true;
+        }
+      });
+    });
+
+    // cleanup when component unmounts
+    return () => {
+      if (remoteAudioCleanupRef.current) {
+        remoteAudioCleanupRef.current();
+        remoteAudioCleanupRef.current = null;
+      }
+    };
+  }, [room, remoteParticipants.length]);
+
+  // Effect B: listen for NEW subscriptions via Room events (fires when avatar track actually arrives)
+  useEffect(() => {
+    if (!room) return;
+
+    const onTrackSubscribed = (
+      track: any,
+      publication: RemoteTrackPublication,
+      participant: RemoteParticipant
+    ) => {
+      if (publication.kind === Track.Kind.Audio) {
+        console.log('📡 RoomEvent.TrackSubscribed (audio) from', participant.sid);
+        attachPlaybackListener(track as RemoteAudioTrack);
+      }
+    };
+
+    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
+
+    return () => {
+      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    };
+  }, [room]);
 
   if (!mounted) return null;
 
