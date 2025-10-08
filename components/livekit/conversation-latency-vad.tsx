@@ -1,5 +1,7 @@
 'use client';
+
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRemoteParticipants } from '@livekit/components-react';
 import type { RemoteTrackPublication } from 'livekit-client';
 
@@ -7,18 +9,25 @@ import type { RemoteTrackPublication } from 'livekit-client';
  * Measures latency between when the user stops speaking
  * (detected with Voice Activity Detection) and when
  * the remote avatar starts responding.
+ * Always visible thanks to a React Portal.
  */
 export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
   const [userEndTime, setUserEndTime] = useState<number | null>(null);
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
+  const [mounted, setMounted] = useState(false); // for SSR safety
 
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const latencyHistoryRef = useRef<number[]>([]);
   const remoteParticipants = useRemoteParticipants();
+
+  // --- Mount check for createPortal ---
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // --- Voice Activity Detection (VAD) for local user ---
   useEffect(() => {
@@ -36,8 +45,7 @@ export const ConversationLatencyVAD = () => {
         const checkVolume = () => {
           analyser.getByteFrequencyData(dataArray);
           const avg = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
-
-          const speaking = avg > 15; // slightly more sensitive
+          const speaking = avg > 15; // lower threshold for sensitivity
 
           if (speaking && !isUserSpeaking) {
             setIsUserSpeaking(true);
@@ -105,13 +113,16 @@ export const ConversationLatencyVAD = () => {
     };
   }, [remoteParticipants, userEndTime]);
 
-  // --- Display overlay (high-contrast so it's visible on dark UIs) ---
-  return (
+  // --- Render nothing on server ---
+  if (!mounted) return null;
+
+  // --- Display overlay in a portal (always on top) ---
+  return createPortal(
     <div
       className="
-        fixed bottom-6 right-6 z-[9999]
-        bg-white/90 text-black text-sm font-mono
-        px-4 py-2 rounded-lg shadow-lg border border-black/10
+        fixed bottom-6 right-6 z-[99999]
+        bg-white text-black text-sm font-mono
+        px-4 py-2 rounded-lg shadow-lg border border-black/20
       "
     >
       {latestLatency === null ? (
@@ -126,6 +137,7 @@ export const ConversationLatencyVAD = () => {
           )}
         </>
       )}
-    </div>
+    </div>,
+    document.body
   );
 };
