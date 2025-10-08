@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRemoteParticipants } from '@livekit/components-react';
-import type { RemoteTrackPublication, RemoteAudioTrack } from 'livekit-client';
+import type { RemoteParticipant, RemoteTrackPublication, RemoteAudioTrack } from 'livekit-client';
 
 export const ConversationLatencyVAD = () => {
   const [latestLatency, setLatestLatency] = useState<number | null>(null);
@@ -20,24 +20,22 @@ export const ConversationLatencyVAD = () => {
 
   useEffect(() => setMounted(true), []);
 
-  // --- VAD for local user ---
+  /* ------------------  Voice Activity Detection  ------------------ */
   useEffect(() => {
     const init = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        const audioContext = new AudioContext();
-        const analyser = audioContext.createAnalyser();
-        const source = audioContext.createMediaStreamSource(stream);
-        source.connect(analyser);
+        const ctx = new AudioContext();
+        const analyser = ctx.createAnalyser();
+        const src = ctx.createMediaStreamSource(stream);
+        src.connect(analyser);
         analyser.fftSize = 512;
 
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        const checkVolume = () => {
-          analyser.getByteFrequencyData(dataArray);
-          const avg = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const loop = () => {
+          analyser.getByteFrequencyData(data);
+          const avg = data.reduce((a, b) => a + b, 0) / data.length;
           const speaking = avg > 15;
-
           if (speaking && !isUserSpeaking) {
             setIsUserSpeaking(true);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
@@ -50,50 +48,51 @@ export const ConversationLatencyVAD = () => {
               }, 400);
             }
           }
-
-          requestAnimationFrame(checkVolume);
+          requestAnimationFrame(loop);
         };
-
-        requestAnimationFrame(checkVolume);
+        requestAnimationFrame(loop);
         analyserRef.current = analyser;
-        audioContextRef.current = audioContext;
-      } catch (err) {
-        console.error('VAD init error:', err);
+        audioContextRef.current = ctx;
+      } catch (e) {
+        console.error('VAD init error:', e);
       }
     };
-
     init();
     return () => {
       if (audioContextRef.current) audioContextRef.current.close();
     };
   }, [isUserSpeaking]);
 
-  // --- Detect when any remote audio starts playing ---
+  /* ------------------  Detect avatar playback  ------------------ */
   useEffect(() => {
-    const remote = remoteParticipants[0];
-    if (!remote) return;
+    if (!remoteParticipants.length) return;
 
-    // Find *any* audio-capable publication
-    const pubs: RemoteTrackPublication[] = Array.from(remote.trackPublications.values());
-    const audioPub =
-      pubs.find((p) => p.kind === 'audio') ||
-      pubs.find((p) => p.source?.toString().includes('microphone')) ||
-      pubs.find((p) => p.track instanceof Object);
+    // pick the first participant with any published tracks
+    const remote: RemoteParticipant | undefined = remoteParticipants.find(
+      (p) => p.trackPublications.size > 0
+    );
 
-    if (!audioPub) {
-      console.log('⚠️ No remote audio publication found (scanned', pubs.length, 'pubs)');
+    if (!remote) {
+      console.log('⚠️ No remote participant with tracks yet.');
       return;
     }
 
-    const track = audioPub.track as RemoteAudioTrack | undefined;
-    if (!track) {
-      console.log('⚠️ Remote track exists but has no audio track yet');
+    const pubs = Array.from(remote.trackPublications.values());
+    console.log('🔍 Remote pubs found:', pubs.length, pubs.map((p) => p.source));
+
+    // find any audio track
+    const audioPub: RemoteTrackPublication | undefined = pubs.find(
+      (p) => p.kind === 'audio' || p.source?.toString().includes('microphone')
+    );
+
+    if (!audioPub || !audioPub.track) {
+      console.log('⚠️ No remote audio track yet, will re-check on next render');
       return;
     }
 
-    console.log('✅ Found remote track, attaching for playback detection');
+    const track = audioPub.track as RemoteAudioTrack;
+    console.log('✅ Found remote audio track, attaching listener');
 
-    // Attach to hidden <audio> to detect "play" events
     const audioEl = track.attach();
     audioEl.muted = true;
     audioEl.style.display = 'none';
@@ -105,13 +104,13 @@ export const ConversationLatencyVAD = () => {
         const latencyMs = Date.now() - userEndTime;
         setLatestLatency(latencyMs);
         latencyHistoryRef.current.push(latencyMs);
-
         const avg =
           latencyHistoryRef.current.reduce((a, b) => a + b, 0) /
           latencyHistoryRef.current.length;
         setAverageLatency(avg);
-
-        console.log(`🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`);
+        console.log(
+          `🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`
+        );
       }
     };
 
@@ -122,11 +121,12 @@ export const ConversationLatencyVAD = () => {
       track.detach(audioEl);
       audioEl.remove();
     };
-  }, [remoteParticipants, userEndTime]);
+  }, [remoteParticipants.map((p) => p.trackPublications.size).join(','), userEndTime]);
+  // ^ depend on the number of remote publications so it re-runs when a new track appears
 
   if (!mounted) return null;
 
-  // --- Overlay UI ---
+  /* ------------------  Overlay UI  ------------------ */
   return createPortal(
     <div
       className="
@@ -136,7 +136,7 @@ export const ConversationLatencyVAD = () => {
       "
     >
       {latestLatency === null ? (
-        <span>Listening...</span>
+        <span>Waiting for avatar audio...</span>
       ) : (
         <>
           <div>Last: {latestLatency} ms</div>
