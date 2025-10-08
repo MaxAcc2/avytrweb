@@ -39,6 +39,8 @@ export const SessionView = ({
   const [chatOpen, setChatOpen] = useState(false);
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
+
+  // 👇 NEW state for listening hint
   const [showListeningHint, setShowListeningHint] = useState(false);
 
   useDebugMode({
@@ -130,40 +132,40 @@ export const SessionView = ({
     <section
       ref={ref}
       inert={disabled}
-      className="relative flex flex-col min-h-screen"
+      className={cn(
+        'opacity-0',
+        !chatOpen && 'max-h-svh overflow-hidden'
+      )}
     >
-      {/* 💬 Chat area BELOW the video (half screen scrollable) */}
       <ChatMessageView
         className={cn(
-          'relative z-10 mx-auto w-full max-w-2xl px-3 pt-32 pb-40 transition-[opacity,transform] duration-300 ease-out md:px-0 md:pt-36 md:pb-48',
-          chatOpen ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'
+          'mx-auto min-h-svh w-full max-w-2xl px-3 pt-32 pb-40 transition-[opacity,translate] duration-300 ease-out md:px-0 md:pt-36 md:pb-48',
+          chatOpen ? 'translate-y-0 opacity-100 delay-200' : 'translate-y-20 opacity-0'
         )}
       >
-        <div className="overflow-y-auto max-h-[50vh] rounded-lg bg-background p-2 shadow-inner scrollbar-thin scrollbar-thumb-muted-foreground/40 scrollbar-track-transparent">
-          <div className="space-y-1 whitespace-pre-wrap leading-snug">
-            <AnimatePresence>
-              {messages.map((message: ReceivedChatMessage) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.5, ease: 'easeOut' }}
-                >
-                  <ChatEntry hideName entry={message} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
+        <div className="space-y-1 whitespace-pre-wrap">
+          <AnimatePresence>
+            {messages.map((message: ReceivedChatMessage) => (
+              <motion.div
+                key={message.id}
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.5, ease: 'easeOut' }}
+              >
+                <ChatEntry hideName entry={message} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
       </ChatMessageView>
 
-      {/* 🎥 Agent / Avatar stays full-size above the chat */}
-      <div className="flex-grow relative z-20">
-        <MediaTiles chatOpen={false} />
+      <div className="bg-background mp-12 fixed top-0 right-0 left-0 h-32 md:h-36">
+        <div className="from-background absolute bottom-0 left-0 h-12 w-full translate-y-full bg-gradient-to-b to-transparent" />
       </div>
 
-      {/* 🧠 Control bar + Listening hint */}
+      <MediaTiles chatOpen={false} />
+
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -180,7 +182,10 @@ export const SessionView = ({
                 initial={{ opacity: 0 }}
                 animate={{
                   opacity: showListeningHint ? 1 : 0,
-                  transition: { ease: 'easeIn', duration: 0.5 },
+                  transition: {
+                    ease: 'easeIn',
+                    duration: 0.5,
+                  },
                 }}
                 aria-hidden={!showListeningHint}
                 className={cn(
@@ -205,7 +210,7 @@ export const SessionView = ({
         </motion.div>
       </div>
 
-      {/* ✅ Latency overlay */}
+      {/* ✅ Add latency overlay */}
       {sessionStarted && <ConversationLatencyVAD />}
     </section>
   );
