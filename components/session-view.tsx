@@ -17,6 +17,7 @@ import useChatAndTranscription from '@/hooks/useChatAndTranscription';
 import { useDebugMode } from '@/hooks/useDebug';
 import type { AppConfig } from '@/lib/types';
 import { cn } from '@/lib/utils';
+import { ConversationLatencyVAD } from '@/components/livekit/conversation-latency-vad';
 
 function isAgentAvailable(agentState: AgentState) {
   return agentState == 'listening' || agentState == 'thinking' || agentState == 'speaking';
@@ -181,6 +182,8 @@ export const SessionView = ({
           <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>
+      {/* ✅ Add latency overlay */}
+      {sessionStarted && <ConversationLatencyVAD />}
     </section>
   );
 };
