@@ -261,7 +261,7 @@ export const ConversationLatencyVAD = () => {
     };
   };
 
-  // Scan existing tracks (mid-call join) -
+  // Scan existing tracks (mid-call join)
   useEffect(() => {
     if (!room) return;
     room.remoteParticipants.forEach((rp: RemoteParticipant) => {
