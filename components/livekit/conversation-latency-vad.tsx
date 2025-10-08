@@ -13,6 +13,7 @@ export const ConversationLatencyVAD = () => {
   const [averageLatency, setAverageLatency] = useState<number | null>(null);
   const [userEndTime, setUserEndTime] = useState<number | null>(null);
   const [isUserSpeaking, setIsUserSpeaking] = useState(false);
+
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -34,16 +35,15 @@ export const ConversationLatencyVAD = () => {
 
         const checkVolume = () => {
           analyser.getByteFrequencyData(dataArray);
-          const avg =
-            dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
+          const avg = dataArray.reduce((sum, v) => sum + v, 0) / dataArray.length;
 
-          const speaking = avg > 20; // Adjust threshold if needed
+          const speaking = avg > 15; // slightly more sensitive
 
           if (speaking && !isUserSpeaking) {
             setIsUserSpeaking(true);
             if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
           } else if (!speaking && isUserSpeaking) {
-            // Sustained silence for 400ms -> user stopped talking
+            // sustained silence for 400 ms → user stopped talking
             if (!silenceTimerRef.current) {
               silenceTimerRef.current = setTimeout(() => {
                 setIsUserSpeaking(false);
@@ -66,7 +66,6 @@ export const ConversationLatencyVAD = () => {
     };
 
     init();
-
     return () => {
       if (audioContextRef.current) audioContextRef.current.close();
     };
@@ -77,7 +76,6 @@ export const ConversationLatencyVAD = () => {
     const remote = remoteParticipants[0];
     if (!remote) return;
 
-    // ✅ Use the correct way to get the remote audio publication
     const audioPub: RemoteTrackPublication | undefined = Array.from(
       remote.trackPublications.values()
     ).find((pub) => pub.kind === 'audio');
@@ -90,36 +88,39 @@ export const ConversationLatencyVAD = () => {
         setLatestLatency(latencyMs);
         latencyHistoryRef.current.push(latencyMs);
 
-        // Compute rolling average
         const avg =
           latencyHistoryRef.current.reduce((a, b) => a + b, 0) /
           latencyHistoryRef.current.length;
         setAverageLatency(avg);
 
         console.log(
-          `🕒 Conversation latency: ${latencyMs}ms (avg ${avg.toFixed(0)}ms)`
+          `🕒 Conversation latency: ${latencyMs} ms (avg ${avg.toFixed(0)} ms)`
         );
       }
     };
 
     audioPub.on('subscribed', handleSubscribed);
-
-    // ✅ Proper cleanup
     return () => {
       audioPub.off('subscribed', handleSubscribed);
     };
   }, [remoteParticipants, userEndTime]);
 
-  // --- Display overlay ---
+  // --- Display overlay (high-contrast so it's visible on dark UIs) ---
   return (
-    <div className="fixed bottom-5 right-5 bg-black/70 text-white text-xs px-3 py-2 rounded-xl shadow-md font-mono">
+    <div
+      className="
+        fixed bottom-6 right-6 z-[9999]
+        bg-white/90 text-black text-sm font-mono
+        px-4 py-2 rounded-lg shadow-lg border border-black/10
+      "
+    >
       {latestLatency === null ? (
         <span>Listening...</span>
       ) : (
         <>
           <div>Last: {latestLatency} ms</div>
           {averageLatency && (
-            <div className="text-gray-300">
+            <div className="text-gray-700">
               Avg: {averageLatency.toFixed(0)} ms
             </div>
           )}
