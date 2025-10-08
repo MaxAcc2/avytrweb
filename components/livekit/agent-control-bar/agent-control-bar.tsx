@@ -110,6 +110,7 @@ export function AgentControlBar({
       )}
       {...props}
     >
+      {/* 🗨️ Chat input field (appears when chat is open) */}
       {capabilities.supportsChatInput && (
         <div
           inert={!chatOpen}
@@ -126,7 +127,20 @@ export function AgentControlBar({
       )}
 
       <div className="flex flex-row justify-between gap-1">
-        <div className="flex gap-1">
+        <div className="flex gap-1 items-center">
+          {/* 💬 Chat Toggle Button */}
+          {capabilities.supportsChatInput && (
+            <Toggle
+              pressed={chatOpen}
+              onPressedChange={setChatOpen}
+              aria-label="Toggle chat view"
+              className="rounded-full px-3 py-2"
+            >
+              <ChatTextIcon className="h-5 w-5" />
+            </Toggle>
+          )}
+
+          {/* 🎤 Microphone control */}
           {visibleControls.microphone && (
             <div className="flex items-center gap-0">
               <TrackToggle
@@ -152,7 +166,9 @@ export function AgentControlBar({
                   ></span>
                 </BarVisualizer>
               </TrackToggle>
+
               <hr className="bg-separator1 peer-data-[state=off]/track:bg-separatorSerious relative z-10 -mr-px hidden h-4 w-px md:block" />
+
               <DeviceSelect
                 size="sm"
                 kind="audioinput"
@@ -171,6 +187,7 @@ export function AgentControlBar({
           )}
         </div>
 
+        {/* 🔴 Disconnect / End Session Button */}
         {visibleControls.leave && (
           <Button
             variant="destructive"
