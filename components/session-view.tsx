@@ -47,7 +47,7 @@ export const SessionView = ({
     await send(message);
   }
 
-  // 🔌 Session timeout if agent doesn't join
+  // End session if agent never really joins
   useEffect(() => {
     if (!sessionStarted) return;
     const timeout = setTimeout(() => {
@@ -79,36 +79,30 @@ export const SessionView = ({
     return () => clearTimeout(timeout);
   }, [agentState, sessionStarted, room]);
 
-  // 🎥 Detect when avatar video is ready
+  // Show "Listening..." after remote video is actually present
   useEffect(() => {
     const checkVideoReady = () => {
       const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
         p.getTrackPublications().some(
-          (pub) =>
-            pub.track &&
-            pub.track.kind === 'video' &&
-            pub.isSubscribed &&
-            !pub.isMuted
-        )
+          (pub) => pub.track && pub.track.kind === 'video' && pub.isSubscribed && !pub.isMuted,
+        ),
       );
       if (hasRemoteVideo) setShowListeningHint(true);
     };
-
     room.on('trackSubscribed', checkVideoReady);
     room.on('participantConnected', checkVideoReady);
     checkVideoReady();
-
     return () => {
       room.off('trackSubscribed', checkVideoReady);
       room.off('participantConnected', checkVideoReady);
     };
   }, [room]);
 
-  // ⏳ Hide "Listening" hint after chat starts
+  // Hide the listening hint shortly after first message
   useEffect(() => {
     if (messages.length > 0) {
-      const timeout = setTimeout(() => setShowListeningHint(false), 2000);
-      return () => clearTimeout(timeout);
+      const t = setTimeout(() => setShowListeningHint(false), 2000);
+      return () => clearTimeout(t);
     }
   }, [messages.length]);
 
@@ -119,20 +113,24 @@ export const SessionView = ({
     <section
       ref={ref}
       inert={disabled}
-      className="relative flex flex-row min-h-screen bg-background"
+      className={cn(
+        'relative min-h-screen bg-background grid transition-[grid-template-columns] duration-300',
+        chatOpen ? 'grid-cols-1 md:[grid-template-columns:1fr_420px]' : 'grid-cols-1',
+      )}
     >
-      {/* 🧩 LEFT: Full video/agent area */}
-      <div className="flex-grow relative z-20 flex items-center justify-center">
+      {/* LEFT: Agent / video. The wrapper clips any absolutely-positioned children of MediaTiles. */}
+      <div className="relative overflow-hidden">
         <MediaTiles chatOpen={false} />
       </div>
 
-      {/* 💬 RIGHT: Sliding chat sidebar */}
+      {/* RIGHT: Chat sidebar (only rendered into the grid when chatOpen = true on md+) */}
       <aside
         className={cn(
-          'relative z-10 flex flex-col w-full max-w-md border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
-          chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
+          'hidden md:flex flex-col border-l border-bg2 bg-background',
+          chatOpen && 'md:block md:flex',
         )}
       >
+        {/* Chat messages */}
         <ChatMessageView className="flex-grow overflow-y-auto p-3">
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
@@ -151,16 +149,11 @@ export const SessionView = ({
           </div>
         </ChatMessageView>
 
-        {/* Chat input pinned to sidebar bottom */}
-        {capabilities.supportsChatInput && (
-          <div className="border-t border-bg2 p-2">
-            {/* We reuse the AgentControlBar input via chat toggle, 
-                but this keeps layout stable if we ever want inline chat */}
-          </div>
-        )}
+        {/* Optional: keep empty footer to avoid the fixed control bar overlapping the last message */}
+        <div className="h-4" />
       </aside>
 
-      {/* 🎛️ Fixed control bar (bottom full width) */}
+      {/* Fixed control bar across bottom */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -175,15 +168,9 @@ export const SessionView = ({
             {appConfig.isPreConnectBufferEnabled && (
               <motion.div
                 initial={{ opacity: 0 }}
-                animate={{
-                  opacity: showListeningHint ? 1 : 0,
-                  transition: { ease: 'easeIn', duration: 0.5 },
-                }}
+                animate={{ opacity: showListeningHint ? 1 : 0, transition: { ease: 'easeIn', duration: 0.5 } }}
                 aria-hidden={!showListeningHint}
-                className={cn(
-                  'absolute inset-x-0 -top-12 text-center',
-                  showListeningHint && 'pointer-events-none'
-                )}
+                className="absolute inset-x-0 -top-12 text-center pointer-events-none"
               >
                 <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
                   Listening... ask a question
@@ -202,7 +189,7 @@ export const SessionView = ({
         </motion.div>
       </div>
 
-      {/* ⚡ Conversation latency overlay */}
+      {/* Latency overlay */}
       {sessionStarted && <ConversationLatencyVAD />}
     </section>
   );
