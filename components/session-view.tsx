@@ -36,7 +36,7 @@ export const SessionView = ({
 }: React.ComponentProps<'div'> & SessionViewProps) => {
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
-  const [hasMounted, setHasMounted] = useState(false); // gate responsive/layout changes until client
+  const [hasMounted, setHasMounted] = useState(false); // ✅ prevent 2-column flicker
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
@@ -48,7 +48,7 @@ export const SessionView = ({
     await send(message);
   }
 
-  // Only enable multi-column layout AFTER mount
+  // ✅ Prevent SSR layout flicker: force 1-column until mounted
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -112,7 +112,7 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
-  // Scroll to top when new messages arrive (newest at top)
+  // 🆕 Scroll to top when new messages arrive (since newest is at top)
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = 0;
@@ -122,114 +122,95 @@ export const SessionView = ({
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
   const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
 
-  // Only allow two-column after mount + when chat is open
-  const twoCol = hasMounted && chatOpen;
-
   return (
-    <>
-      {/* 🔒 SSR-only guard: force 1 column at and above md on first paint before hydration */}
-      {!hasMounted && (
-        <style
-          // Ensures no 2-col media query can sneak in before hydration
-          dangerouslySetInnerHTML={{
-            __html: `
-              @media (min-width: 768px) {
-                #app-grid { grid-template-columns: 1fr !important; }
-              }
-            `,
-          }}
-        />
+    <section
+      ref={ref}
+      inert={disabled}
+      className={cn(
+        'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
+        hasMounted && chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
       )}
+    >
+      {/* LEFT: avatar / video */}
+      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
+        <MediaTiles chatOpen={chatOpen} />
+      </div>
 
-      <section
-        id="app-grid"
-        ref={ref}
-        inert={disabled}
+      {/* RIGHT: chat panel */}
+      <aside
         className={cn(
-          // Always ship as 1 column; add md:grid-cols-2 ONLY after mount + when chat is open
-          'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
-          'grid-cols-1',
-          twoCol && 'md:grid-cols-2',
+          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
+          chatOpen
+            ? 'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100'
+            : 'translate-x-full opacity-0 md:relative md:translate-x-0 md:opacity-0',
         )}
       >
-        {/* LEFT: avatar / video */}
-        <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
-          <MediaTiles chatOpen={twoCol} />
-        </div>
-
-        {/* RIGHT: chat panel — do NOT render until mounted & chat is open */}
-        {twoCol && (
-          <aside
-            className={cn(
-              'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
-              'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100',
-            )}
-          >
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 pt-[140px]">
-              <div className="space-y-1 whitespace-pre-wrap leading-snug">
-                <AnimatePresence>
-                  {[...messages].reverse().map((message: ReceivedChatMessage) => (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: -10, height: 0 }}
-                      animate={{ opacity: 1, y: 0, height: 'auto' }}
-                      exit={{ opacity: 0, y: -10, height: 0 }}
-                      transition={{ duration: 0.4, ease: 'easeOut' }}
-                    >
-                      <ChatEntry hideName entry={message} />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            </div>
-            <div className="h-3 shrink-0" />
-          </aside>
-        )}
-
-        {/* control bar */}
-        <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
-          <motion.div
-            key="control-bar"
-            initial={{ opacity: 0, translateY: '100%' }}
-            animate={{
-              opacity: sessionStarted ? 1 : 0,
-              translateY: sessionStarted ? '0%' : '100%',
-            }}
-            transition={{ duration: 0.3, delay: sessionStarted ? 0.5 : 0, ease: 'easeOut' }}
-          >
-            <div className="relative z-10 mx-auto w-full max-w-2xl">
-              {appConfig.isPreConnectBufferEnabled && (
+        <div
+          ref={chatScrollRef}
+          className="flex-1 overflow-y-auto p-3 pt-[140px]"
+        >
+          <div className="space-y-1 whitespace-pre-wrap leading-snug">
+            <AnimatePresence>
+              {[...messages].reverse().map((message: ReceivedChatMessage) => (
                 <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{
-                    opacity: showListeningHint ? 1 : 0,
-                    transition: { ease: 'easeIn', duration: 0.5 },
-                  }}
-                  aria-hidden={!showListeningHint}
-                  className="absolute inset-x-0 -top-12 text-center pointer-events-none"
+                  key={message.id}
+                  initial={{ opacity: 0, y: -10, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: -10, height: 0 }}
+                  transition={{ duration: 0.4, ease: 'easeOut' }}
                 >
-                  <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
-                    Listening... ask a question
-                  </p>
+                  <ChatEntry hideName entry={message} />
                 </motion.div>
-              )}
-
-              <AgentControlBar
-                capabilities={capabilities}
-                onChatOpenChange={setChatOpen}
-                onSendMessage={handleSendMessage}
-              />
-            </div>
-
-            <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
-          </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
         </div>
+        <div className="h-3 shrink-0" />
+      </aside>
 
-        {/* latency overlay always visible */}
-        <div className="z-[60] pointer-events-none fixed top-0 right-0">
-          {sessionStarted && <ConversationLatencyVAD />}
-        </div>
-      </section>
-    </>
+      {/* control bar */}
+      <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
+        <motion.div
+          key="control-bar"
+          initial={{ opacity: 0, translateY: '100%' }}
+          animate={{
+            opacity: sessionStarted ? 1 : 0,
+            translateY: sessionStarted ? '0%' : '100%',
+          }}
+          transition={{ duration: 0.3, delay: sessionStarted ? 0.5 : 0, ease: 'easeOut' }}
+        >
+          <div className="relative z-10 mx-auto w-full max-w-2xl">
+            {appConfig.isPreConnectBufferEnabled && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{
+                  opacity: showListeningHint ? 1 : 0,
+                  transition: { ease: 'easeIn', duration: 0.5 },
+                }}
+                aria-hidden={!showListeningHint}
+                className="absolute inset-x-0 -top-12 text-center pointer-events-none"
+              >
+                <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
+                  Listening... ask a question
+                </p>
+              </motion.div>
+            )}
+
+            <AgentControlBar
+              capabilities={capabilities}
+              onChatOpenChange={setChatOpen}
+              onSendMessage={handleSendMessage}
+            />
+          </div>
+
+          <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
+        </motion.div>
+      </div>
+
+      {/* latency overlay always visible */}
+      <div className="z-[60] pointer-events-none fixed top-0 right-0">
+        {sessionStarted && <ConversationLatencyVAD />}
+      </div>
+    </section>
   );
 };
