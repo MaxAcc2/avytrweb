@@ -37,10 +37,8 @@ export const SessionView = ({
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
 
-  // Prevent SSR/layout flicker
+  // Prevent SSR/layout flicker and transient "open" blips
   const [hasMounted, setHasMounted] = useState(false);
-
-  // Stabilize "open" signal so 2-col layouts don't react to 1-frame blips
   const [gridChatOpen, setGridChatOpen] = useState(false);
   useEffect(() => {
     if (chatOpen) {
@@ -139,31 +137,36 @@ export const SessionView = ({
       ref={ref}
       inert={disabled}
       className={cn(
-        'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
-        // Always single column on small screens
+        'relative min-h-screen bg-background grid overflow-visible isolate',
+        'transition-[grid-template-columns] duration-300',
+        // always single column on small screens
         'grid-cols-1',
-        // Desktop: closed = second column is width 0; open = 1fr/1fr
+        // desktop: closed => second column width 0; open => 1fr/1fr
         hasMounted && gridChatOpen
           ? 'md:[grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]'
           : 'md:[grid-template-columns:minmax(0,1fr)_0]'
       )}
     >
       {/* LEFT: avatar / video */}
-      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
-        {/* IMPORTANT: pass the STABILIZED flag, not raw chatOpen */}
+      <div className="relative z-10 flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
+        {/* Pass stabilized flag so inner layout doesn't blip */}
         <MediaTiles chatOpen={gridChatOpen} />
       </div>
 
       {/* RIGHT: chat panel */}
       <aside
         className={cn(
-          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out overflow-hidden',
-          // Mobile slides; desktop width is controlled by the grid
+          'relative z-0 flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
+          // Mobile slides; desktop width controlled by grid
           chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
           'md:translate-x-0'
         )}
       >
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 pt-[140px]">
+        {/* Chat scroll area — add bottom padding so it never sits under the sticky mobile bar */}
+        <div
+          ref={chatScrollRef}
+          className="flex-1 overflow-y-auto p-3 pt-[140px] pb-24 md:pb-0"
+        >
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
               {[...messages].reverse().map((message: ReceivedChatMessage) => (
@@ -180,11 +183,38 @@ export const SessionView = ({
             </AnimatePresence>
           </div>
         </div>
+
+        {/* MOBILE control bar: sticky within chat column so it never overlays the avatar */}
+        <div className="md:hidden sticky bottom-0 z-10 bg-background px-3 pt-2 pb-3">
+          <div className="relative z-10 mx-auto w-full max-w-2xl">
+            {appConfig.isPreConnectBufferEnabled && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{
+                  opacity: showListeningHint ? 1 : 0,
+                  transition: { ease: 'easeIn', duration: 0.5 },
+                }}
+                aria-hidden={!showListeningHint}
+                className="absolute inset-x-0 -top-12 text-center pointer-events-none"
+              >
+                <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
+                  Listening... ask a question
+                </p>
+              </motion.div>
+            )}
+            <AgentControlBar
+              capabilities={capabilities}
+              onChatOpenChange={setChatOpen}
+              onSendMessage={handleSendMessage}
+            />
+          </div>
+        </div>
+
         <div className="h-3 shrink-0" />
       </aside>
 
-      {/* control bar */}
-      <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
+      {/* DESKTOP control bar: keep fixed full-width as before, but only on md+ so it won't cover the avatar on mobile */}
+      <div className="hidden md:block bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
           initial={{ opacity: 0, translateY: '100%' }}
@@ -218,6 +248,7 @@ export const SessionView = ({
             />
           </div>
 
+          {/* keep the subtle top fade for the fixed desktop bar */}
           <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>
