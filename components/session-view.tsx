@@ -36,7 +36,7 @@ export const SessionView = ({
 }: React.ComponentProps<'div'> & SessionViewProps) => {
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
-  const [hasMounted, setHasMounted] = useState(false); // ✅ prevent 2-column flicker
+  const [hasMounted, setHasMounted] = useState(false); // gate responsive classes until client
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
@@ -48,7 +48,7 @@ export const SessionView = ({
     await send(message);
   }
 
-  // ✅ Prevent SSR layout flicker: force 1-column until mounted
+  // Only enable responsive layout after mount to avoid SSR flicker
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -112,7 +112,7 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
-  // 🆕 Scroll to top when new messages arrive (since newest is at top)
+  // Scroll to top when new messages arrive (newest at top)
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = 0;
@@ -127,8 +127,10 @@ export const SessionView = ({
       ref={ref}
       inert={disabled}
       className={cn(
-        'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
-        hasMounted && chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
+        // Always start as 1 column; only add md:grid-cols-2 after mount when chat is open
+        'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
+        'grid-cols-1',
+        hasMounted && chatOpen ? 'md:grid-cols-2' : undefined,
       )}
     >
       {/* LEFT: avatar / video */}
