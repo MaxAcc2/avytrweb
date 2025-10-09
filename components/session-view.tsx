@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { ConversationLatencyVAD } from '@/components/livekit/conversation-latency-vad';
 
 function isAgentAvailable(agentState: AgentState) {
-  return agentState == 'listening' || agentState == 'thinking' || agentState == 'speaking';
+  return agentState === 'listening' || agentState === 'thinking' || agentState === 'speaking';
 }
 
 interface SessionViewProps {
@@ -39,54 +39,47 @@ export const SessionView = ({
   const [chatOpen, setChatOpen] = useState(false);
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
-
-  // 👇 NEW state for listening hint
   const [showListeningHint, setShowListeningHint] = useState(false);
 
-  useDebugMode({
-    enabled: process.env.NODE_ENV !== 'production',
-  });
+  useDebugMode({ enabled: process.env.NODE_ENV !== 'production' });
 
   async function handleSendMessage(message: string) {
     await send(message);
   }
 
-  // Session timeout if agent doesn't join
+  // 🔌 Session timeout if agent doesn't join
   useEffect(() => {
-    if (sessionStarted) {
-      const timeout = setTimeout(() => {
-        if (!isAgentAvailable(agentState)) {
-          const reason =
-            agentState === 'connecting'
-              ? 'Agent did not join the room. '
-              : 'Agent connected but did not complete initializing. ';
-
-          toastAlert({
-            title: 'Session ended',
-            description: (
-              <p className="w-full">
-                {reason}
-                <a
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  href="https://docs.livekit.io/agents/start/voice-ai/"
-                  className="whitespace-nowrap underline"
-                >
-                  See quickstart guide
-                </a>
-                .
-              </p>
-            ),
-          });
-          room.disconnect();
-        }
-      }, 20_000);
-
-      return () => clearTimeout(timeout);
-    }
+    if (!sessionStarted) return;
+    const timeout = setTimeout(() => {
+      if (!isAgentAvailable(agentState)) {
+        const reason =
+          agentState === 'connecting'
+            ? 'Agent did not join the room. '
+            : 'Agent connected but did not complete initializing. ';
+        toastAlert({
+          title: 'Session ended',
+          description: (
+            <p className="w-full">
+              {reason}
+              <a
+                target="_blank"
+                rel="noopener noreferrer"
+                href="https://docs.livekit.io/agents/start/voice-ai/"
+                className="whitespace-nowrap underline"
+              >
+                See quickstart guide
+              </a>
+              .
+            </p>
+          ),
+        });
+        room.disconnect();
+      }
+    }, 20_000);
+    return () => clearTimeout(timeout);
   }, [agentState, sessionStarted, room]);
 
-  // 👇 Show "Listening..." only after avatar video is visible
+  // 🎥 Detect when avatar video is ready
   useEffect(() => {
     const checkVideoReady = () => {
       const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
@@ -98,9 +91,7 @@ export const SessionView = ({
             !pub.isMuted
         )
       );
-      if (hasRemoteVideo) {
-        setShowListeningHint(true);
-      }
+      if (hasRemoteVideo) setShowListeningHint(true);
     };
 
     room.on('trackSubscribed', checkVideoReady);
@@ -113,7 +104,7 @@ export const SessionView = ({
     };
   }, [room]);
 
-  // 👇 Delay hiding the hint for 2s after first message arrives
+  // ⏳ Hide "Listening" hint after chat starts
   useEffect(() => {
     if (messages.length > 0) {
       const timeout = setTimeout(() => setShowListeningHint(false), 2000);
@@ -122,50 +113,54 @@ export const SessionView = ({
   }, [messages.length]);
 
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
-  const capabilities = {
-    supportsChatInput,
-    supportsVideoInput,
-    supportsScreenShare,
-  };
+  const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
 
   return (
     <section
       ref={ref}
       inert={disabled}
-      className={cn(
-        'opacity-0',
-        !chatOpen && 'max-h-svh overflow-hidden'
-      )}
+      className="relative flex flex-row min-h-screen bg-background"
     >
-      <ChatMessageView
-        className={cn(
-          'mx-auto min-h-svh w-full max-w-2xl px-3 pt-32 pb-40 transition-[opacity,translate] duration-300 ease-out md:px-0 md:pt-36 md:pb-48',
-          chatOpen ? 'translate-y-0 opacity-100 delay-200' : 'translate-y-20 opacity-0'
-        )}
-      >
-        <div className="space-y-3 whitespace-pre-wrap">
-          <AnimatePresence>
-            {messages.map((message: ReceivedChatMessage) => (
-              <motion.div
-                key={message.id}
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                transition={{ duration: 0.5, ease: 'easeOut' }}
-              >
-                <ChatEntry hideName entry={message} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      </ChatMessageView>
-
-      <div className="bg-background mp-12 fixed top-0 right-0 left-0 h-32 md:h-36">
-        <div className="from-background absolute bottom-0 left-0 h-12 w-full translate-y-full bg-gradient-to-b to-transparent" />
+      {/* 🧩 LEFT: Full video/agent area */}
+      <div className="flex-grow relative z-20 flex items-center justify-center">
+        <MediaTiles chatOpen={false} />
       </div>
 
-      <MediaTiles chatOpen={false} />
+      {/* 💬 RIGHT: Sliding chat sidebar */}
+      <aside
+        className={cn(
+          'relative z-10 flex flex-col w-full max-w-md border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
+          chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
+        )}
+      >
+        <ChatMessageView className="flex-grow overflow-y-auto p-3">
+          <div className="space-y-1 whitespace-pre-wrap leading-snug">
+            <AnimatePresence>
+              {messages.map((message: ReceivedChatMessage) => (
+                <motion.div
+                  key={message.id}
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                >
+                  <ChatEntry hideName entry={message} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </ChatMessageView>
 
+        {/* Chat input pinned to sidebar bottom */}
+        {capabilities.supportsChatInput && (
+          <div className="border-t border-bg2 p-2">
+            {/* We reuse the AgentControlBar input via chat toggle, 
+                but this keeps layout stable if we ever want inline chat */}
+          </div>
+        )}
+      </aside>
+
+      {/* 🎛️ Fixed control bar (bottom full width) */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -182,10 +177,7 @@ export const SessionView = ({
                 initial={{ opacity: 0 }}
                 animate={{
                   opacity: showListeningHint ? 1 : 0,
-                  transition: {
-                    ease: 'easeIn',
-                    duration: 0.5,
-                  },
+                  transition: { ease: 'easeIn', duration: 0.5 },
                 }}
                 aria-hidden={!showListeningHint}
                 className={cn(
@@ -210,7 +202,7 @@ export const SessionView = ({
         </motion.div>
       </div>
 
-      {/* ✅ Add latency overlay */}
+      {/* ⚡ Conversation latency overlay */}
       {sessionStarted && <ConversationLatencyVAD />}
     </section>
   );
