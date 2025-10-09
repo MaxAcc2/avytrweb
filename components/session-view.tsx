@@ -106,6 +106,13 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
+  // 🆕 Scroll to top when a new message arrives (since newest is at top)
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = 0;
+    }
+  }, [messages.length]);
+
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
   const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
 
@@ -139,13 +146,14 @@ export const SessionView = ({
         >
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
-              {messages.map((message: ReceivedChatMessage) => (
+              {/* 🆕 Reverse message order so newest is at the top */}
+              {[...messages].reverse().map((message: ReceivedChatMessage) => (
                 <motion.div
                   key={message.id}
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  initial={{ opacity: 0, y: -10, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: -10, height: 0 }}
+                  transition={{ duration: 0.4, ease: 'easeOut' }}
                 >
                   <ChatEntry hideName entry={message} />
                 </motion.div>
