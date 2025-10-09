@@ -65,7 +65,6 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
 
   const transition = { ...animationProps.transition, delay: chatOpen ? 0 : 0.15 };
 
-  // 🎛️ Scale a bit smaller when chat is closed
   const agentAnimate = {
     ...animationProps.animate,
     scale: chatOpen ? 1 : 0.9,
@@ -80,14 +79,16 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   const isAvatar = agentVideoTrack !== undefined;
 
   return (
-    // 🧱 Flex-centered container — no absolute positioning
+    // 🧱 Container flex-centered with equal top/bottom padding
     <div
       className={cn(
         'pointer-events-none relative z-10 flex w-full h-full items-center justify-center transition-all duration-500',
-        chatOpen ? 'mt-[140px]' : 'mt-0', // top margin aligns with chat when open
+        chatOpen
+          ? 'py-[140px] px-8 md:px-16' // when chat is open → pad top/bottom + sides
+          : 'py-0 px-8 md:px-16', // when chat closed → just horizontal breathing room
       )}
     >
-      <div className="relative h-auto w-full flex items-center justify-center">
+      <div className="relative flex h-auto w-full items-center justify-center">
         <div className={cn(classNames.grid, 'place-items-center')}>
           {/* === Agent / Avatar === */}
           <div
