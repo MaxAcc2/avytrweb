@@ -47,6 +47,7 @@ export function useLocalTrackRef(source: Track.Source) {
 }
 
 interface MediaTilesProps {
+  // NOW receives the stabilized "open" flag
   chatOpen: boolean;
 }
 
@@ -82,7 +83,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   return (
     <div
       className={cn(
-        // 🧭 Anchored to top of column (no vertical centering)
+        // anchored to top is fine
         'pointer-events-none relative z-10 flex w-full items-start justify-center transition-all duration-500',
         chatOpen
           ? 'pt-[40px] pb-0 pl-[40px] pr-[60px]' // 2-column padding
@@ -110,7 +111,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   transition={transition}
                   state={agentState}
                   audioTrack={agentAudioTrack}
-                  className={cn('w-full scale-[1]')} // reset scaling for loader dots
+                  className={cn('w-full scale-[1]')}
                 />
               )}
               {isAvatar && (
@@ -123,7 +124,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   videoTrack={agentVideoTrack}
                   className={cn(
                     'w-full [&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
-                    chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
+                    chatOpen ? 'max-h:[70vh]' : 'max-h-[80vh]',
                   )}
                 />
               )}

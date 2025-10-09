@@ -37,10 +37,10 @@ export const SessionView = ({
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
 
-  // Prevent SSR layout flicker & blips
+  // Prevent SSR/layout flicker
   const [hasMounted, setHasMounted] = useState(false);
 
-  // Grid-only stabilized "open" flag so brief mount-time blips don't toggle 2 columns
+  // Stabilize "open" signal so 2-col layouts don't react to 1-frame blips
   const [gridChatOpen, setGridChatOpen] = useState(false);
   useEffect(() => {
     if (chatOpen) {
@@ -61,7 +61,6 @@ export const SessionView = ({
     await send(message);
   }
 
-  // Mount flag
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -125,7 +124,7 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
-  // Scroll to top when new messages arrive (since newest is at top)
+  // newest at top -> scroll to top on new messages
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = 0;
@@ -143,7 +142,7 @@ export const SessionView = ({
         'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
         // Always single column on small screens
         'grid-cols-1',
-        // Desktop behavior: second column width is 0 when "closed", expands to 1fr when open.
+        // Desktop: closed = second column is width 0; open = 1fr/1fr
         hasMounted && gridChatOpen
           ? 'md:[grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]'
           : 'md:[grid-template-columns:minmax(0,1fr)_0]'
@@ -151,14 +150,15 @@ export const SessionView = ({
     >
       {/* LEFT: avatar / video */}
       <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
-        <MediaTiles chatOpen={chatOpen} />
+        {/* IMPORTANT: pass the STABILIZED flag, not raw chatOpen */}
+        <MediaTiles chatOpen={gridChatOpen} />
       </div>
 
       {/* RIGHT: chat panel */}
       <aside
         className={cn(
           'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out overflow-hidden',
-          // Mobile: slide in/out. Desktop: width is controlled by the grid; keep translate-x reset.
+          // Mobile slides; desktop width is controlled by the grid
           chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
           'md:translate-x-0'
         )}
