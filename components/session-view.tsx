@@ -36,7 +36,20 @@ export const SessionView = ({
 }: React.ComponentProps<'div'> & SessionViewProps) => {
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
-  const [hasMounted, setHasMounted] = useState(false); // ✅ prevent 2-column flicker
+
+  // Prevent SSR layout flicker & blips
+  const [hasMounted, setHasMounted] = useState(false);
+
+  // Grid-only stabilized "open" flag so brief mount-time blips don't toggle 2 columns
+  const [gridChatOpen, setGridChatOpen] = useState(false);
+  useEffect(() => {
+    if (chatOpen) {
+      const id = requestAnimationFrame(() => setGridChatOpen(true));
+      return () => cancelAnimationFrame(id);
+    }
+    setGridChatOpen(false);
+  }, [chatOpen]);
+
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
@@ -48,7 +61,7 @@ export const SessionView = ({
     await send(message);
   }
 
-  // ✅ Prevent SSR layout flicker: force 1-column until mounted
+  // Mount flag
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -112,7 +125,7 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
-  // 🆕 Scroll to top when new messages arrive (since newest is at top)
+  // Scroll to top when new messages arrive (since newest is at top)
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = 0;
@@ -127,8 +140,13 @@ export const SessionView = ({
       ref={ref}
       inert={disabled}
       className={cn(
-        'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
-        hasMounted && chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
+        'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
+        // Always single column on small screens
+        'grid-cols-1',
+        // Desktop behavior: second column width is 0 when "closed", expands to 1fr when open.
+        hasMounted && gridChatOpen
+          ? 'md:[grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]'
+          : 'md:[grid-template-columns:minmax(0,1fr)_0]'
       )}
     >
       {/* LEFT: avatar / video */}
@@ -139,16 +157,13 @@ export const SessionView = ({
       {/* RIGHT: chat panel */}
       <aside
         className={cn(
-          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
-          chatOpen
-            ? 'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100'
-            : 'translate-x-full opacity-0 md:relative md:translate-x-0 md:opacity-0',
+          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out overflow-hidden',
+          // Mobile: slide in/out. Desktop: width is controlled by the grid; keep translate-x reset.
+          chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
+          'md:translate-x-0'
         )}
       >
-        <div
-          ref={chatScrollRef}
-          className="flex-1 overflow-y-auto p-3 pt-[140px]"
-        >
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 pt-[140px]">
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
               {[...messages].reverse().map((message: ReceivedChatMessage) => (
