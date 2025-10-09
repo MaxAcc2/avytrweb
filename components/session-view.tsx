@@ -39,7 +39,6 @@ export const SessionView = ({
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
-
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useDebugMode({ enabled: process.env.NODE_ENV !== 'production' });
@@ -48,7 +47,7 @@ export const SessionView = ({
     await send(message);
   }
 
-  // End session if agent never joins fully
+  // timeout if agent doesn’t join
   useEffect(() => {
     if (!sessionStarted) return;
     const timeout = setTimeout(() => {
@@ -80,7 +79,7 @@ export const SessionView = ({
     return () => clearTimeout(timeout);
   }, [agentState, sessionStarted, room]);
 
-  // Show "Listening..." only after avatar video is visible
+  // detect video ready
   useEffect(() => {
     const checkVideoReady = () => {
       const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
@@ -90,31 +89,22 @@ export const SessionView = ({
       );
       if (hasRemoteVideo) setShowListeningHint(true);
     };
-
     room.on('trackSubscribed', checkVideoReady);
     room.on('participantConnected', checkVideoReady);
     checkVideoReady();
-
     return () => {
       room.off('trackSubscribed', checkVideoReady);
       room.off('participantConnected', checkVideoReady);
     };
   }, [room]);
 
-  // Hide hint after first message
+  // hide “Listening…” after first message
   useEffect(() => {
     if (messages.length > 0) {
       const t = setTimeout(() => setShowListeningHint(false), 2000);
       return () => clearTimeout(t);
     }
   }, [messages.length]);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
-  }, [messages.length, chatOpen]);
 
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
   const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
@@ -125,26 +115,27 @@ export const SessionView = ({
       inert={disabled}
       className={cn(
         'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
-        chatOpen
-          ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' // 2 columns when chat open
-          : 'grid-cols-1', // single column when closed
+        chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
       )}
     >
-      {/* LEFT: Agent / Video */}
-      <div className="relative flex items-center justify-center overflow-hidden bg-background">
-        <MediaTiles chatOpen={false} />
+      {/* LEFT: avatar / video */}
+      <div className="relative flex items-center justify-center overflow-hidden bg-background transition-all duration-500 pt-[140px]">
+        <MediaTiles chatOpen={chatOpen} />
       </div>
 
-      {/* RIGHT: Chat Column */}
+      {/* RIGHT: chat panel */}
       <aside
         className={cn(
           'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
-          chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 absolute right-0 top-0 bottom-0 w-full md:relative md:w-auto',
+          chatOpen
+            ? 'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100'
+            : 'translate-x-full opacity-0 md:relative md:translate-x-0 md:opacity-0',
         )}
       >
         <div
           ref={chatScrollRef}
-          className="flex-1 overflow-y-auto p-3"
+          // 🟢 Top padding (same as video area)
+          className="flex-1 overflow-y-auto p-3 pt-[140px]"
         >
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
@@ -162,11 +153,10 @@ export const SessionView = ({
             </AnimatePresence>
           </div>
         </div>
-
         <div className="h-3 shrink-0" />
       </aside>
 
-      {/* Bottom Control Bar */}
+      {/* control bar */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -205,8 +195,10 @@ export const SessionView = ({
         </motion.div>
       </div>
 
-      {/* Latency overlay */}
-      {sessionStarted && <ConversationLatencyVAD />}
+      {/* latency overlay always visible */}
+      <div className="z-[60] pointer-events-none fixed top-0 right-0">
+        {sessionStarted && <ConversationLatencyVAD />}
+      </div>
     </section>
   );
 };

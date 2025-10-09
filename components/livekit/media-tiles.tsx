@@ -41,7 +41,7 @@ export function useLocalTrackRef(source: Track.Source) {
   const publication = localParticipant.getTrackPublication(source);
   const trackRef = useMemo<TrackReference | undefined>(
     () => (publication ? { source, participant: localParticipant, publication } : undefined),
-    [source, publication, localParticipant]
+    [source, publication, localParticipant],
   );
   return trackRef;
 }
@@ -80,11 +80,16 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   const isAvatar = agentVideoTrack !== undefined;
 
   return (
-    // Fill parent grid cell fully
-    <div className="pointer-events-none absolute inset-0 z-10">
+    // 🧱 Fill parent grid cell fully, align center, and respect 140px top offset
+    <div
+      className={cn(
+        'pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-center pt-[140px]',
+        chatOpen ? 'h-full' : 'max-h-[80vh]',
+      )}
+    >
       <div className="relative h-full w-full">
         <div className={cn(classNames.grid)}>
-          {/* Agent / Avatar */}
+          {/* === Agent / Avatar === */}
           <div
             className={cn([
               'grid',
@@ -117,14 +122,14 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   className={cn(
                     chatOpen
                       ? 'h-[90px] [&>video]:h-[90px] [&>video]:w-auto'
-                      : 'h-auto w-full [&>video]:w-full [&>video]:h-auto'
+                      : 'h-auto w-full [&>video]:w-full [&>video]:h-auto',
                   )}
                 />
               )}
             </AnimatePresence>
           </div>
 
-          {/* Secondary Tile (camera or screen share) */}
+          {/* === Second Tile (camera or screen share) === */}
           <div
             className={cn([
               'grid',
