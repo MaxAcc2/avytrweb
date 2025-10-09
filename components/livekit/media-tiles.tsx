@@ -27,12 +27,12 @@ const classNames = {
   grid: [
     'h-full w-full',
     'grid gap-x-2 place-content-center',
-    'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]', // ✅ fixed and closed properly
+    'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]',
   ],
-  agentChatOpenWithSecondTile: ['col-start-1 row-start-1', 'self-center justify-self-end'],
-  agentChatOpenWithoutSecondTile: ['col-start-1 row-start-1', 'col-span-2', 'place-content-center'],
+  agentChatOpenWithSecondTile: ['col-start-1 row-start-1', 'self-start justify-self-end'],
+  agentChatOpenWithoutSecondTile: ['col-start-1 row-start-1', 'col-span-2', 'place-content-start'],
   agentChatClosed: ['col-start-1 row-start-1', 'col-span-2 row-span-3', 'place-content-center'],
-  secondTileChatOpen: ['col-start-2 row-start-1', 'self-center justify-self-start'],
+  secondTileChatOpen: ['col-start-2 row-start-1', 'self-start justify-self-start'],
   secondTileChatClosed: ['col-start-2 row-start-3', 'place-content-end'],
 };
 
@@ -56,6 +56,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
     audioTrack: agentAudioTrack,
     videoTrack: agentVideoTrack,
   } = useVoiceAssistant();
+
   const [screenShareTrack] = useTracks([Track.Source.ScreenShare]);
   const cameraTrack: TrackReference | undefined = useLocalTrackRef(Track.Source.Camera);
 
@@ -81,14 +82,15 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   return (
     <div
       className={cn(
-        'pointer-events-none relative z-10 flex w-full h-full items-center justify-center transition-all duration-500',
+        // 🧭 Anchored to top of column (no vertical centering)
+        'pointer-events-none relative z-10 flex w-full items-start justify-center transition-all duration-500',
         chatOpen
-          ? 'pt-[20px] pb-[0px] pl-[40px] pr-[60px]' // 🧭 higher avatar, less right padding
-          : 'py-0 px-8 md:px-16', // 1-column remains centered
+          ? 'pt-[40px] pb-0 pl-[40px] pr-[60px]' // 2-column padding
+          : 'pt-[60px] pb-0 px-8 md:px-16', // 1-column centered padding
       )}
     >
-      <div className="relative flex h-auto w-full items-center justify-center">
-        <div className={cn(classNames.grid, 'place-items-center')}>
+      <div className="relative flex h-auto w-full items-start justify-center">
+        <div className={cn(classNames.grid, 'place-items-start')}>
           {/* === Agent / Avatar === */}
           <div
             className={cn([
