@@ -65,30 +65,30 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
 
   const transition = { ...animationProps.transition, delay: chatOpen ? 0 : 0.15 };
 
-  // 🧠 Adjust scale logic — slightly larger in 2-column mode, smaller in 1-column
+  // 🎛️ Scale a bit smaller when chat is closed
   const agentAnimate = {
     ...animationProps.animate,
-    scale: chatOpen ? 1 : 0.85,
+    scale: chatOpen ? 1 : 0.9,
     transition,
   };
   const avatarAnimate = {
     ...animationProps.animate,
-    scale: chatOpen ? 1 : 0.85,
+    scale: chatOpen ? 1 : 0.9,
     transition,
   };
 
   const isAvatar = agentVideoTrack !== undefined;
 
   return (
-    // 🧱 Container fills available space; only pads top when chat is open
+    // 🧱 Flex-centered container — no absolute positioning
     <div
       className={cn(
-        'pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-center transition-all duration-500',
-        chatOpen ? 'pt-[140px]' : 'pt-0',
+        'pointer-events-none relative z-10 flex w-full h-full items-center justify-center transition-all duration-500',
+        chatOpen ? 'mt-[140px]' : 'mt-0', // top margin aligns with chat when open
       )}
     >
-      <div className="relative h-full w-full">
-        <div className={cn(classNames.grid)}>
+      <div className="relative h-auto w-full flex items-center justify-center">
+        <div className={cn(classNames.grid, 'place-items-center')}>
           {/* === Agent / Avatar === */}
           <div
             className={cn([
@@ -108,7 +108,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   transition={transition}
                   state={agentState}
                   audioTrack={agentAudioTrack}
-                  className={cn(chatOpen ? 'h-[90px]' : 'h-auto w-full')}
+                  className={cn('w-full')}
                 />
               )}
               {isAvatar && (
@@ -120,16 +120,15 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   transition={transition}
                   videoTrack={agentVideoTrack}
                   className={cn(
-                    chatOpen
-                      ? 'h-auto w-full [&>video]:w-full [&>video]:h-auto'
-                      : 'max-h-[80vh] w-full [&>video]:object-contain [&>video]:max-h-[80vh]',
+                    'w-full [&>video]:w-full [&>video]:h-auto [&>video]:object-contain',
+                    chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
                   )}
                 />
               )}
             </AnimatePresence>
           </div>
 
-          {/* === Second Tile (camera or screen share) === */}
+          {/* === Secondary Tile (camera or screen share) === */}
           <div
             className={cn([
               'grid',
