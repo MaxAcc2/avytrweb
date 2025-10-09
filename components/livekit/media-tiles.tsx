@@ -65,26 +65,26 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
 
   const transition = { ...animationProps.transition, delay: chatOpen ? 0 : 0.15 };
 
-  // 🌟 Add subtle scale effect when chat is open
+  // 🧠 Adjust scale logic — slightly larger in 2-column mode, smaller in 1-column
   const agentAnimate = {
     ...animationProps.animate,
-    scale: chatOpen ? 0.8 : 1,
+    scale: chatOpen ? 1 : 0.85,
     transition,
   };
   const avatarAnimate = {
     ...animationProps.animate,
-    scale: chatOpen ? 0.8 : 1,
+    scale: chatOpen ? 1 : 0.85,
     transition,
   };
 
   const isAvatar = agentVideoTrack !== undefined;
 
   return (
-    // 🧱 Fill parent grid cell fully, align center, and respect 140px top offset
+    // 🧱 Container fills available space; only pads top when chat is open
     <div
       className={cn(
-        'pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-center pt-[140px]',
-        chatOpen ? 'h-full' : 'max-h-[80vh]',
+        'pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-center transition-all duration-500',
+        chatOpen ? 'pt-[140px]' : 'pt-0',
       )}
     >
       <div className="relative h-full w-full">
@@ -121,8 +121,8 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   videoTrack={agentVideoTrack}
                   className={cn(
                     chatOpen
-                      ? 'h-[90px] [&>video]:h-[90px] [&>video]:w-auto'
-                      : 'h-auto w-full [&>video]:w-full [&>video]:h-auto',
+                      ? 'h-auto w-full [&>video]:w-full [&>video]:h-auto'
+                      : 'max-h-[80vh] w-full [&>video]:object-contain [&>video]:max-h-[80vh]',
                   )}
                 />
               )}
