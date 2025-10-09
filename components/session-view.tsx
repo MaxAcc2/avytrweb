@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   type AgentState,
@@ -11,6 +11,7 @@ import {
 import { toastAlert } from '@/components/alert-toast';
 import { AgentControlBar } from '@/components/livekit/agent-control-bar/agent-control-bar';
 import { ChatEntry } from '@/components/livekit/chat/chat-entry';
+import { ChatMessageView } from '@/components/livekit/chat/chat-message-view';
 import { MediaTiles } from '@/components/livekit/media-tiles';
 import useChatAndTranscription from '@/hooks/useChatAndTranscription';
 import { useDebugMode } from '@/hooks/useDebug';
@@ -38,125 +39,142 @@ export const SessionView = ({
   const [chatOpen, setChatOpen] = useState(false);
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
-  const [showListeningHint, setShowListeningHint] = useState(false);
-  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
-  useDebugMode({ enabled: process.env.NODE_ENV !== 'production' });
+  // 👂 “Listening…” hint state
+  const [showListeningHint, setShowListeningHint] = useState(false);
+
+  useDebugMode({
+    enabled: process.env.NODE_ENV !== 'production',
+  });
 
   async function handleSendMessage(message: string) {
     await send(message);
   }
 
-  // timeout if agent doesn’t join
+  // 🕒 Auto-timeout if agent never joins
   useEffect(() => {
-    if (!sessionStarted) return;
-    const timeout = setTimeout(() => {
-      if (!isAgentAvailable(agentState)) {
-        const reason =
-          agentState === 'connecting'
-            ? 'Agent did not join the room. '
-            : 'Agent connected but did not complete initializing. ';
-        toastAlert({
-          title: 'Session ended',
-          description: (
-            <p className="w-full">
-              {reason}
-              <a
-                target="_blank"
-                rel="noopener noreferrer"
-                href="https://docs.livekit.io/agents/start/voice-ai/"
-                className="whitespace-nowrap underline"
-              >
-                See quickstart guide
-              </a>
-              .
-            </p>
-          ),
-        });
-        room.disconnect();
-      }
-    }, 20_000);
-    return () => clearTimeout(timeout);
+    if (sessionStarted) {
+      const timeout = setTimeout(() => {
+        if (!isAgentAvailable(agentState)) {
+          const reason =
+            agentState === 'connecting'
+              ? 'Agent did not join the room.'
+              : 'Agent connected but did not complete initializing.';
+
+          toastAlert({
+            title: 'Session ended',
+            description: (
+              <p className="w-full">
+                {reason}{' '}
+                <a
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  href="https://docs.livekit.io/agents/start/voice-ai/"
+                  className="underline whitespace-nowrap"
+                >
+                  See quickstart guide
+                </a>
+                .
+              </p>
+            ),
+          });
+          room.disconnect();
+        }
+      }, 20_000);
+
+      return () => clearTimeout(timeout);
+    }
   }, [agentState, sessionStarted, room]);
 
-  // detect video ready
+  // 🎥 Show “Listening…” only after avatar video appears
   useEffect(() => {
     const checkVideoReady = () => {
       const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
         p.getTrackPublications().some(
-          (pub) => pub.track && pub.track.kind === 'video' && pub.isSubscribed && !pub.isMuted,
+          (pub) =>
+            pub.track &&
+            pub.track.kind === 'video' &&
+            pub.isSubscribed &&
+            !pub.isMuted,
         ),
       );
       if (hasRemoteVideo) setShowListeningHint(true);
     };
+
     room.on('trackSubscribed', checkVideoReady);
     room.on('participantConnected', checkVideoReady);
     checkVideoReady();
+
     return () => {
       room.off('trackSubscribed', checkVideoReady);
       room.off('participantConnected', checkVideoReady);
     };
   }, [room]);
 
-  // hide “Listening…” after first message
+  // ⏱️ Hide “Listening…” after first message
   useEffect(() => {
     if (messages.length > 0) {
-      const t = setTimeout(() => setShowListeningHint(false), 2000);
-      return () => clearTimeout(t);
+      const timeout = setTimeout(() => setShowListeningHint(false), 2000);
+      return () => clearTimeout(timeout);
     }
   }, [messages.length]);
 
+  // ✅ Capabilities for control bar
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
-  const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
+  const capabilities = {
+    supportsChatInput,
+    supportsVideoInput,
+    supportsScreenShare,
+  };
+
+  // ✅ Scroll to newest message (top) when chat updates
+  useEffect(() => {
+    const chatContainer = document.querySelector('.chat-scroll-container');
+    if (chatContainer) chatContainer.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [messages.length]);
 
   return (
     <section
       ref={ref}
       inert={disabled}
-      className={cn(
-        'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
-        chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
-      )}
+      className={cn('opacity-0', !chatOpen && 'max-h-svh overflow-hidden')}
     >
-      {/* LEFT: avatar / video */}
-      <div className="relative flex items-center justify-center overflow-hidden bg-background transition-all duration-500 pt-[140px]">
-        <MediaTiles chatOpen={chatOpen} />
-      </div>
-
-      {/* RIGHT: chat panel */}
-      <aside
+      {/* === Chat messages === */}
+      <ChatMessageView
         className={cn(
-          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
-          chatOpen
-            ? 'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100'
-            : 'translate-x-full opacity-0 md:relative md:translate-x-0 md:opacity-0',
+          'mx-auto w-full max-w-2xl px-3 pt-[140px] pb-[180px] transition-[opacity,translate] duration-300 ease-out md:px-0 md:pt-[160px]',
+          chatOpen ? 'translate-y-0 opacity-100 delay-200' : 'translate-y-20 opacity-0',
         )}
       >
         <div
-          ref={chatScrollRef}
-          // 🟢 Top padding (same as video area)
-          className="flex-1 overflow-y-auto p-3 pt-[140px]"
+          className="chat-scroll-container flex flex-col-reverse overflow-y-auto max-h-[50vh] space-y-3 space-y-reverse whitespace-pre-wrap pb-2"
+          style={{ scrollBehavior: 'smooth' }}
         >
-          <div className="space-y-1 whitespace-pre-wrap leading-snug">
-            <AnimatePresence>
-              {messages.map((message: ReceivedChatMessage) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.5, ease: 'easeOut' }}
-                >
-                  <ChatEntry hideName entry={message} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
+          <AnimatePresence>
+            {messages.map((message: ReceivedChatMessage) => (
+              <motion.div
+                key={message.id}
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.4, ease: 'easeOut' }}
+              >
+                <ChatEntry hideName entry={message} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
         </div>
-        <div className="h-3 shrink-0" />
-      </aside>
+      </ChatMessageView>
 
-      {/* control bar */}
+      {/* === Background and gradient fade === */}
+      <div className="bg-background mp-12 fixed top-0 right-0 left-0 h-32 md:h-36">
+        <div className="from-background absolute bottom-0 left-0 h-12 w-full translate-y-full bg-gradient-to-b to-transparent" />
+      </div>
+
+      {/* === Avatar / Video === */}
+      <MediaTiles chatOpen={chatOpen} />
+
+      {/* === Bottom Control Bar === */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -176,7 +194,10 @@ export const SessionView = ({
                   transition: { ease: 'easeIn', duration: 0.5 },
                 }}
                 aria-hidden={!showListeningHint}
-                className="absolute inset-x-0 -top-12 text-center pointer-events-none"
+                className={cn(
+                  'absolute inset-x-0 -top-12 text-center',
+                  showListeningHint && 'pointer-events-none',
+                )}
               >
                 <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
                   Listening... ask a question
@@ -195,10 +216,8 @@ export const SessionView = ({
         </motion.div>
       </div>
 
-      {/* latency overlay always visible */}
-      <div className="z-[60] pointer-events-none fixed top-0 right-0">
-        {sessionStarted && <ConversationLatencyVAD />}
-      </div>
+      {/* ✅ Conversation latency overlay */}
+      {sessionStarted && <ConversationLatencyVAD />}
     </section>
   );
 };

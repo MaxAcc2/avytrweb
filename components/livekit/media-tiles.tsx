@@ -17,9 +17,9 @@ const MotionAgentTile = motion.create(AgentTile);
 const MotionAvatarTile = motion.create(AvatarTile);
 
 const animationProps = {
-  initial: { opacity: 0, scale: 0 },
+  initial: { opacity: 0, scale: 0.9 },
   animate: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0 },
+  exit: { opacity: 0, scale: 0.9 },
   transition: { type: 'spring', stiffness: 675, damping: 75, mass: 1 },
 };
 
@@ -27,7 +27,7 @@ const classNames = {
   grid: [
     'h-full w-full',
     'grid gap-x-2 place-content-center',
-    'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]', // ✅ fixed and closed properly
+    'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]',
   ],
   agentChatOpenWithSecondTile: ['col-start-1 row-start-1', 'self-center justify-self-end'],
   agentChatOpenWithoutSecondTile: ['col-start-1 row-start-1', 'col-span-2', 'place-content-center'],
@@ -56,6 +56,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
     audioTrack: agentAudioTrack,
     videoTrack: agentVideoTrack,
   } = useVoiceAssistant();
+
   const [screenShareTrack] = useTracks([Track.Source.ScreenShare]);
   const cameraTrack: TrackReference | undefined = useLocalTrackRef(Track.Source.Camera);
 
@@ -70,6 +71,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
     scale: chatOpen ? 1 : 0.9,
     transition,
   };
+
   const avatarAnimate = {
     ...animationProps.animate,
     scale: chatOpen ? 1 : 0.9,
@@ -89,7 +91,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
     >
       <div className="relative flex h-auto w-full items-center justify-center">
         <div className={cn(classNames.grid, 'place-items-center')}>
-          {/* === Agent / Avatar === */}
+          {/* === Agent / Avatar Tile === */}
           <div
             className={cn([
               'grid',
@@ -99,6 +101,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
             ])}
           >
             <AnimatePresence mode="popLayout">
+              {/* === Agent (audio only) === */}
               {!isAvatar && (
                 <MotionAgentTile
                   key="agent"
@@ -108,9 +111,11 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   transition={transition}
                   state={agentState}
                   audioTrack={agentAudioTrack}
-                  className={cn('w-full scale-[1]')} // reset scaling for loader dots
+                  className={cn('w-full scale-[1]')}
                 />
               )}
+
+              {/* === Avatar (video) === */}
               {isAvatar && (
                 <MotionAvatarTile
                   key="avatar"
@@ -120,15 +125,23 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
                   transition={transition}
                   videoTrack={agentVideoTrack}
                   className={cn(
-                    'w-full [&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
+                    'w-full scale-[1] overflow-hidden rounded-2xl bg-background/80 flex items-center justify-center',
                     chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
+                    '[&>video]:h-full [&>video]:w-auto [&>video]:object-contain'
                   )}
-                />
+                  style={{ minHeight: chatOpen ? '70vh' : '80vh' }} // ✅ prevents resize pop
+                >
+                  {!agentVideoTrack?.publication?.isSubscribed && (
+                    <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm">
+                      Loading avatar...
+                    </div>
+                  )}
+                </MotionAvatarTile>
               )}
             </AnimatePresence>
           </div>
 
-          {/* === Secondary Tile (camera or screen share) === */}
+          {/* === Second Tile (camera or screen share) === */}
           <div
             className={cn([
               'grid',
