@@ -79,13 +79,13 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   const isAvatar = agentVideoTrack !== undefined;
 
   return (
-    // 🧱 Container flex-centered with equal top/bottom padding
+    // Outer wrapper ensures consistent flex centering and asymmetric padding when chat is open
     <div
       className={cn(
         'pointer-events-none relative z-10 flex w-full h-full items-center justify-center transition-all duration-500',
         chatOpen
-          ? 'py-[140px] px-8 md:px-16' // when chat is open → pad top/bottom + sides
-          : 'py-0 px-8 md:px-16', // when chat closed → just horizontal breathing room
+          ? 'py-[60px] pl-[60px] pr-[160px]' // 🧭 when chat is open → smaller top padding, more right breathing room
+          : 'py-[0px] px-8 md:px-16', // when chat closed → standard breathing room
       )}
     >
       <div className="relative flex h-auto w-full items-center justify-center">
