@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import {
   type AgentState,
@@ -11,7 +11,8 @@ import {
 import { toastAlert } from '@/components/alert-toast';
 import { AgentControlBar } from '@/components/livekit/agent-control-bar/agent-control-bar';
 import { ChatEntry } from '@/components/livekit/chat/chat-entry';
-import { ChatMessageView } from '@/components/livekit/chat/chat-message-view';
+// NOTE: We won't rely on ChatMessageView to avoid hidden/absolute styles.
+// import { ChatMessageView } from '@/components/livekit/chat/chat-message-view';
 import { MediaTiles } from '@/components/livekit/media-tiles';
 import useChatAndTranscription from '@/hooks/useChatAndTranscription';
 import { useDebugMode } from '@/hooks/useDebug';
@@ -41,13 +42,16 @@ export const SessionView = ({
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
 
+  // auto-scroll container
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
   useDebugMode({ enabled: process.env.NODE_ENV !== 'production' });
 
   async function handleSendMessage(message: string) {
     await send(message);
   }
 
-  // End session if agent never really joins
+  // End session if agent never joins fully
   useEffect(() => {
     if (!sessionStarted) return;
     const timeout = setTimeout(() => {
@@ -79,7 +83,7 @@ export const SessionView = ({
     return () => clearTimeout(timeout);
   }, [agentState, sessionStarted, room]);
 
-  // Show "Listening..." after remote video is actually present
+  // Show "Listening..." only after avatar video is visible
   useEffect(() => {
     const checkVideoReady = () => {
       const hasRemoteVideo = Array.from(room.remoteParticipants.values()).some((p) =>
@@ -89,22 +93,30 @@ export const SessionView = ({
       );
       if (hasRemoteVideo) setShowListeningHint(true);
     };
+
     room.on('trackSubscribed', checkVideoReady);
     room.on('participantConnected', checkVideoReady);
     checkVideoReady();
+
     return () => {
       room.off('trackSubscribed', checkVideoReady);
       room.off('participantConnected', checkVideoReady);
     };
   }, [room]);
 
-  // Hide the listening hint shortly after first message
+  // Hide hint after messages begin
   useEffect(() => {
     if (messages.length > 0) {
       const t = setTimeout(() => setShowListeningHint(false), 2000);
       return () => clearTimeout(t);
     }
   }, [messages.length]);
+
+  // Auto-scroll chat to bottom on new messages or when opening pane
+  useEffect(() => {
+    if (!chatScrollRef.current) return;
+    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+  }, [messages.length, chatOpen]);
 
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
   const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
@@ -113,25 +125,26 @@ export const SessionView = ({
     <section
       ref={ref}
       inert={disabled}
-      className={cn(
-        'relative min-h-screen bg-background grid transition-[grid-template-columns] duration-300',
-        chatOpen ? 'grid-cols-1 md:[grid-template-columns:1fr_420px]' : 'grid-cols-1',
-      )}
+      className="relative flex min-h-screen bg-background"
     >
-      {/* LEFT: Agent / video. The wrapper clips any absolutely-positioned children of MediaTiles. */}
-      <div className="relative overflow-hidden">
+      {/* LEFT: Full video/agent area */}
+      <div className="relative flex-grow basis-0 overflow-hidden">
         <MediaTiles chatOpen={false} />
       </div>
 
-      {/* RIGHT: Chat sidebar (only rendered into the grid when chatOpen = true on md+) */}
+      {/* RIGHT: Chat sidebar that slides open; fixed width, collapses to w-0 when closed */}
       <aside
         className={cn(
-          'hidden md:flex flex-col border-l border-bg2 bg-background',
-          chatOpen && 'md:block md:flex',
+          'relative flex flex-col border-l border-bg2 bg-background transition-all duration-300 ease-out overflow-hidden',
+          chatOpen ? 'w-[420px]' : 'w-0',
         )}
+        aria-hidden={!chatOpen}
       >
-        {/* Chat messages */}
-        <ChatMessageView className="flex-grow overflow-y-auto p-3">
+        {/* Scrollable chat thread */}
+        <div
+          ref={chatScrollRef}
+          className="flex-1 overflow-y-auto p-3"
+        >
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
               {messages.map((message: ReceivedChatMessage) => (
@@ -147,13 +160,13 @@ export const SessionView = ({
               ))}
             </AnimatePresence>
           </div>
-        </ChatMessageView>
+        </div>
 
-        {/* Optional: keep empty footer to avoid the fixed control bar overlapping the last message */}
-        <div className="h-4" />
+        {/* Spacer so fixed control bar doesn’t overlap last message */}
+        <div className="h-3 shrink-0" />
       </aside>
 
-      {/* Fixed control bar across bottom */}
+      {/* Fixed control bar across bottom (still provides the chat toggle + input) */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
