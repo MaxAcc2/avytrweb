@@ -36,7 +36,7 @@ export const SessionView = ({
 }: React.ComponentProps<'div'> & SessionViewProps) => {
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
-  const [hasMounted, setHasMounted] = useState(false); // gate responsive classes until client
+  const [hasMounted, setHasMounted] = useState(false); // gate responsive/layout changes until client
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
@@ -48,7 +48,7 @@ export const SessionView = ({
     await send(message);
   }
 
-  // Only enable responsive layout after mount to avoid SSR flicker
+  // Ensure we only enable multi-column layout AFTER mount
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -122,53 +122,53 @@ export const SessionView = ({
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
   const capabilities = { supportsChatInput, supportsVideoInput, supportsScreenShare };
 
+  // Only allow two-column after mount + when chat is open
+  const twoCol = hasMounted && chatOpen;
+
   return (
     <section
       ref={ref}
       inert={disabled}
       className={cn(
-        // Always start as 1 column; only add md:grid-cols-2 after mount when chat is open
+        // Always start as a single column; add md:grid-cols-2 only when twoCol is true
         'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
         'grid-cols-1',
-        hasMounted && chatOpen ? 'md:grid-cols-2' : undefined,
+        twoCol && 'md:grid-cols-2',
       )}
     >
       {/* LEFT: avatar / video */}
       <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
-        <MediaTiles chatOpen={chatOpen} />
+        <MediaTiles chatOpen={twoCol} />
       </div>
 
-      {/* RIGHT: chat panel */}
-      <aside
-        className={cn(
-          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
-          chatOpen
-            ? 'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100'
-            : 'translate-x-full opacity-0 md:relative md:translate-x-0 md:opacity-0',
-        )}
-      >
-        <div
-          ref={chatScrollRef}
-          className="flex-1 overflow-y-auto p-3 pt-[140px]"
+      {/* RIGHT: chat panel — do NOT render until mounted & chat is open */}
+      {twoCol && (
+        <aside
+          className={cn(
+            'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
+            'translate-x-0 opacity-100 md:relative md:translate-x-0 md:opacity-100'
+          )}
         >
-          <div className="space-y-1 whitespace-pre-wrap leading-snug">
-            <AnimatePresence>
-              {[...messages].reverse().map((message: ReceivedChatMessage) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: -10, height: 0 }}
-                  animate={{ opacity: 1, y: 0, height: 'auto' }}
-                  exit={{ opacity: 0, y: -10, height: 0 }}
-                  transition={{ duration: 0.4, ease: 'easeOut' }}
-                >
-                  <ChatEntry hideName entry={message} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 pt-[140px]">
+            <div className="space-y-1 whitespace-pre-wrap leading-snug">
+              <AnimatePresence>
+                {[...messages].reverse().map((message: ReceivedChatMessage) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: -10, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: -10, height: 0 }}
+                    transition={{ duration: 0.4, ease: 'easeOut' }}
+                  >
+                    <ChatEntry hideName entry={message} />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
-        <div className="h-3 shrink-0" />
-      </aside>
+          <div className="h-3 shrink-0" />
+        </aside>
+      )}
 
       {/* control bar */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
