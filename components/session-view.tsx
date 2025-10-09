@@ -36,6 +36,7 @@ export const SessionView = ({
 }: React.ComponentProps<'div'> & SessionViewProps) => {
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
+  const [hasMounted, setHasMounted] = useState(false); // ✅ prevent 2-column flicker
   const { messages, send } = useChatAndTranscription();
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
@@ -46,6 +47,11 @@ export const SessionView = ({
   async function handleSendMessage(message: string) {
     await send(message);
   }
+
+  // ✅ Prevent SSR layout flicker: force 1-column until mounted
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   // timeout if agent doesn’t join
   useEffect(() => {
@@ -122,11 +128,11 @@ export const SessionView = ({
       inert={disabled}
       className={cn(
         'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
-        chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
+        hasMounted && chatOpen ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' : 'grid-cols-1',
       )}
     >
       {/* LEFT: avatar / video */}
-      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px]">
+      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
         <MediaTiles chatOpen={chatOpen} />
       </div>
 

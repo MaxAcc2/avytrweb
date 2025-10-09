@@ -269,21 +269,5 @@
   }
 }
 
-/* === LiveKit Loading Dots Override === */
-.lk-loading-dots div {
-  width: 18px !important;
-  height: 18px !important;
-  margin: 0 6px !important;
-  background-color: white !important;
-  opacity: 0.9 !important;
-}
 
-@keyframes lk-loading-fade {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-
-.lk-loading-dots div {
-  animation: lk-loading-fade 1.4s infinite ease-in-out both;
-}
 
