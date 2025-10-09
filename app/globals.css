@@ -269,3 +269,11 @@
   }
 }
 
+/* === LiveKit Loading Dots Override === */
+.lk-loading-dots div {
+  width: 30px !important;
+  height: 30x !important;
+  margin: 0 10px !important;
+  background-color: white !important; /* optional: ensures visible on dark backgrounds */
+  opacity: 0.8;
+}

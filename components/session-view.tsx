@@ -106,7 +106,7 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
-  // 🆕 Scroll to top when a new message arrives (since newest is at top)
+  // 🆕 Scroll to top when new messages arrive (since newest is at top)
   useEffect(() => {
     if (chatScrollRef.current) {
       chatScrollRef.current.scrollTop = 0;
@@ -126,7 +126,7 @@ export const SessionView = ({
       )}
     >
       {/* LEFT: avatar / video */}
-      <div className="relative flex items-center justify-center overflow-hidden bg-background transition-all duration-500 pt-[140px]">
+      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px]">
         <MediaTiles chatOpen={chatOpen} />
       </div>
 
@@ -141,12 +141,10 @@ export const SessionView = ({
       >
         <div
           ref={chatScrollRef}
-          // 🟢 Top padding (same as video area)
           className="flex-1 overflow-y-auto p-3 pt-[140px]"
         >
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
-              {/* 🆕 Reverse message order so newest is at the top */}
               {[...messages].reverse().map((message: ReceivedChatMessage) => (
                 <motion.div
                   key={message.id}
