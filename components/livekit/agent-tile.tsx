@@ -1,5 +1,5 @@
 import React from 'react';
-import { type AgentState, BarVisualizer, type TrackReference } from '@livekit/components-react';
+import { AgentState, BarVisualizer, type TrackReference } from '@livekit/components-react';
 import { cn } from '@/lib/utils';
 
 interface AgentAudioTileProps {
@@ -14,8 +14,11 @@ export const AgentTile = ({
   className,
   ref,
 }: React.ComponentProps<'div'> & AgentAudioTileProps) => {
+  // 🧠 Considered “idle” when not speaking or listening
   const isIdle =
-    state === 'idle' || state === 'disconnected' || state === 'connecting' || state === 'thinking';
+    state === AgentState.Connecting ||
+    state === AgentState.Thinking ||
+    state === AgentState.Disconnected;
 
   return (
     <div ref={ref} className={cn('relative flex items-center justify-center', className)}>
