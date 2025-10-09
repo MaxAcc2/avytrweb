@@ -11,8 +11,6 @@ import {
 import { toastAlert } from '@/components/alert-toast';
 import { AgentControlBar } from '@/components/livekit/agent-control-bar/agent-control-bar';
 import { ChatEntry } from '@/components/livekit/chat/chat-entry';
-// NOTE: We won't rely on ChatMessageView to avoid hidden/absolute styles.
-// import { ChatMessageView } from '@/components/livekit/chat/chat-message-view';
 import { MediaTiles } from '@/components/livekit/media-tiles';
 import useChatAndTranscription from '@/hooks/useChatAndTranscription';
 import { useDebugMode } from '@/hooks/useDebug';
@@ -42,7 +40,6 @@ export const SessionView = ({
   const room = useRoomContext();
   const [showListeningHint, setShowListeningHint] = useState(false);
 
-  // auto-scroll container
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   useDebugMode({ enabled: process.env.NODE_ENV !== 'production' });
@@ -104,7 +101,7 @@ export const SessionView = ({
     };
   }, [room]);
 
-  // Hide hint after messages begin
+  // Hide hint after first message
   useEffect(() => {
     if (messages.length > 0) {
       const t = setTimeout(() => setShowListeningHint(false), 2000);
@@ -112,10 +109,11 @@ export const SessionView = ({
     }
   }, [messages.length]);
 
-  // Auto-scroll chat to bottom on new messages or when opening pane
+  // Auto-scroll chat
   useEffect(() => {
-    if (!chatScrollRef.current) return;
-    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
   }, [messages.length, chatOpen]);
 
   const { supportsChatInput, supportsVideoInput, supportsScreenShare } = appConfig;
@@ -125,22 +123,25 @@ export const SessionView = ({
     <section
       ref={ref}
       inert={disabled}
-      className="relative flex min-h-screen bg-background"
+      className={cn(
+        'relative min-h-screen bg-background transition-[grid-template-columns] duration-300 grid overflow-hidden',
+        chatOpen
+          ? 'md:[grid-template-columns:1fr_1fr] grid-cols-1' // 2 columns when chat open
+          : 'grid-cols-1', // single column when closed
+      )}
     >
-      {/* LEFT: Full video/agent area */}
-      <div className="relative flex-grow basis-0 overflow-hidden">
+      {/* LEFT: Agent / Video */}
+      <div className="relative flex items-center justify-center overflow-hidden bg-background">
         <MediaTiles chatOpen={false} />
       </div>
 
-      {/* RIGHT: Chat sidebar that slides open; fixed width, collapses to w-0 when closed */}
+      {/* RIGHT: Chat Column */}
       <aside
         className={cn(
-          'relative flex flex-col border-l border-bg2 bg-background transition-all duration-300 ease-out overflow-hidden',
-          chatOpen ? 'w-[420px]' : 'w-0',
+          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out',
+          chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0 absolute right-0 top-0 bottom-0 w-full md:relative md:w-auto',
         )}
-        aria-hidden={!chatOpen}
       >
-        {/* Scrollable chat thread */}
         <div
           ref={chatScrollRef}
           className="flex-1 overflow-y-auto p-3"
@@ -162,11 +163,10 @@ export const SessionView = ({
           </div>
         </div>
 
-        {/* Spacer so fixed control bar doesn’t overlap last message */}
         <div className="h-3 shrink-0" />
       </aside>
 
-      {/* Fixed control bar across bottom (still provides the chat toggle + input) */}
+      {/* Bottom Control Bar */}
       <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
@@ -181,7 +181,10 @@ export const SessionView = ({
             {appConfig.isPreConnectBufferEnabled && (
               <motion.div
                 initial={{ opacity: 0 }}
-                animate={{ opacity: showListeningHint ? 1 : 0, transition: { ease: 'easeIn', duration: 0.5 } }}
+                animate={{
+                  opacity: showListeningHint ? 1 : 0,
+                  transition: { ease: 'easeIn', duration: 0.5 },
+                }}
                 aria-hidden={!showListeningHint}
                 className="absolute inset-x-0 -top-12 text-center pointer-events-none"
               >
