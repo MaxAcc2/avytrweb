@@ -149,7 +149,7 @@ export const SessionView = ({
       )}
     >
       {/* LEFT: avatar / video */}
-      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
+      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-[padding] duration-300 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
         {/* IMPORTANT: pass the STABILIZED flag, not raw chatOpen */}
         <MediaTiles chatOpen={gridChatOpen} />
       </div>
