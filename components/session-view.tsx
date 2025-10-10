@@ -37,8 +37,10 @@ export const SessionView = ({
   const { state: agentState } = useVoiceAssistant();
   const [chatOpen, setChatOpen] = useState(false);
 
-  // Prevent SSR/layout flicker & transient open blips
+  // Prevent SSR/layout flicker
   const [hasMounted, setHasMounted] = useState(false);
+
+  // Stabilize "open" signal so 2-col layouts don't react to 1-frame blips
   const [gridChatOpen, setGridChatOpen] = useState(false);
   useEffect(() => {
     if (chatOpen) {
@@ -137,49 +139,31 @@ export const SessionView = ({
       ref={ref}
       inert={disabled}
       className={cn(
-        // Mobile: simple vertical flow; Desktop: grid with optional right column
-        'relative min-h-screen bg-background md:grid flex flex-col',
-        // Avoid iOS/safari horizontal scrollbars from transforms/compositing
-        'overflow-x-hidden',
-        // Grid transition only applies on desktop
-        'md:transition-[grid-template-columns] md:duration-300',
+        'relative min-h-screen bg-background grid overflow-hidden transition-[grid-template-columns] duration-300',
+        // Always single column on small screens
+        'grid-cols-1',
+        // Desktop: closed = second column is width 0; open = 1fr/1fr
         hasMounted && gridChatOpen
           ? 'md:[grid-template-columns:minmax(0,1fr)_minmax(0,1fr)]'
           : 'md:[grid-template-columns:minmax(0,1fr)_0]'
       )}
     >
-      {/* LEFT (top on mobile): avatar / video */}
-      <div className="relative z-10 flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
-        {/* Use stabilized open flag to avoid any 1-frame blip */}
+      {/* LEFT: avatar / video */}
+      <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
+        {/* IMPORTANT: pass the STABILIZED flag, not raw chatOpen */}
         <MediaTiles chatOpen={gridChatOpen} />
       </div>
 
-      {/* RIGHT (bottom on mobile): chat panel */}
+      {/* RIGHT: chat panel */}
       <aside
         className={cn(
-          'relative z-0 flex flex-col transition-all duration-300 ease-out',
-          // opaque background on mobile to avoid video compositing glitches
-          'bg-background',
-          // softer/blurred glass only on desktop
-          'md:border-l md:border-bg2 md:bg-background/95 md:backdrop-blur-sm',
-          // Show/hide on mobile without transforms (transforms create horizontal scrollbars on iOS)
-          chatOpen ? 'block' : 'hidden',
-          'md:block' // always present on desktop; width is controlled by the grid
+          'flex flex-col border-l border-bg2 bg-background/95 backdrop-blur-sm transition-all duration-300 ease-out overflow-hidden',
+          // Mobile slides; desktop width is controlled by the grid
+          chatOpen ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0',
+          'md:translate-x-0'
         )}
       >
-        {/* Chat scroll area
-            - Mobile: use the page scroll; let this be visible (no nested scroller).
-            - Desktop: own scroller so the bar can be fixed full-width. */}
-        <div
-          ref={chatScrollRef}
-          className={cn(
-            'p-3 pt-[140px]',
-            // give room for the mobile fixed bar (safe-area aware)
-            'pb-[calc(env(safe-area-inset-bottom)+88px)]',
-            // Desktop scroller
-            'md:flex-1 md:overflow-y-auto md:pb-0'
-          )}
-        >
+        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 pt-[140px]">
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
               {[...messages].reverse().map((message: ReceivedChatMessage) => (
@@ -196,41 +180,11 @@ export const SessionView = ({
             </AnimatePresence>
           </div>
         </div>
-
-        {/* Mobile bottom control bar (fixed, safe-area aware). 
-            Keeping it fixed on mobile maximizes reliability on iOS;
-            we padded the chat content so messages never sit beneath it. */}
-        <div className="md:hidden fixed inset-x-0 bottom-0 z-50 bg-background border-t border-bg2 px-3 pt-2 pb-[calc(env(safe-area-inset-bottom)+12px)]">
-          <div className="relative z-10 mx-auto w-full max-w-2xl">
-            {appConfig.isPreConnectBufferEnabled && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{
-                  opacity: showListeningHint ? 1 : 0,
-                  transition: { ease: 'easeIn', duration: 0.5 },
-                }}
-                aria-hidden={!showListeningHint}
-                className="absolute inset-x-0 -top-12 text-center pointer-events-none"
-              >
-                <p className="animate-text-shimmer inline-block !bg-clip-text text-sm font-semibold text-transparent">
-                  Listening... ask a question
-                </p>
-              </motion.div>
-            )}
-            <AgentControlBar
-              capabilities={capabilities}
-              onChatOpenChange={setChatOpen}
-              onSendMessage={handleSendMessage}
-            />
-          </div>
-        </div>
-
-        {/* Spacer to ensure the end of the column has a little breathing room on desktop */}
-        <div className="hidden md:block h-3 shrink-0" />
+        <div className="h-3 shrink-0" />
       </aside>
 
-      {/* Desktop control bar: full-width fixed, only on md+ */}
-      <div className="hidden md:block bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
+      {/* control bar */}
+      <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
           initial={{ opacity: 0, translateY: '100%' }}
@@ -263,11 +217,12 @@ export const SessionView = ({
               onSendMessage={handleSendMessage}
             />
           </div>
+
           <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>
 
-      {/* latency overlay */}
+      {/* latency overlay always visible */}
       <div className="z-[60] pointer-events-none fixed top-0 right-0">
         {sessionStarted && <ConversationLatencyVAD />}
       </div>
