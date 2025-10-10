@@ -163,7 +163,14 @@ export const SessionView = ({
           'md:translate-x-0'
         )}
       >
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 pt-[140px]">
+        <div
+          ref={chatScrollRef}
+          className={cn(
+            'flex-1 overflow-y-auto p-3',
+            // FIX: remove big top padding on mobile when chat is open
+            chatOpen ? 'pt-0 md:pt-[40px]' : 'pt-0 md:pt-[140px]'
+          )}
+        >
           <div className="space-y-1 whitespace-pre-wrap leading-snug">
             <AnimatePresence>
               {[...messages].reverse().map((message: ReceivedChatMessage) => (
