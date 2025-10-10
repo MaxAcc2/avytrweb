@@ -1,3 +1,4 @@
+// components/livekit/media-tiles.tsx
 import React, { useMemo } from 'react';
 import { Track } from 'livekit-client';
 import { AnimatePresence, motion } from 'motion/react';
@@ -82,11 +83,12 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   return (
     <div
       className={cn(
-        // 🧭 Anchored to top of column (no vertical centering)
-        'pointer-events-none relative z-10 flex w-full items-start justify-center transition-all duration-500',
+        'pointer-events-none relative z-10 flex w-full justify-center transition-all duration-500',
         chatOpen
-          ? 'pt-[40px] pb-0 pl-[40px] pr-[60px]' // 2-column padding
-          : 'pt-[60px] pb-0 px-8 md:px-16', // 1-column centered padding
+          // 2-column view: top-anchored
+          ? 'items-start pt-[40px] pb-0 pl-[40px] pr-[60px]'
+          // 1-column view: centered (both axes) and constrained horizontally
+          : 'items-center min-h-screen px-4 sm:px-8'
       )}
     >
       <div className="relative flex h-auto w-full items-start justify-center">
@@ -100,34 +102,37 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
               chatOpen && !hasSecondTile && classNames.agentChatOpenWithoutSecondTile,
             ])}
           >
-            <AnimatePresence mode="popLayout">
-              {!isAvatar && (
-                <MotionAgentTile
-                  key="agent"
-                  layoutId="agent"
-                  {...animationProps}
-                  animate={agentAnimate}
-                  transition={transition}
-                  state={agentState}
-                  audioTrack={agentAudioTrack}
-                  className={cn('w-full scale-[1]')} // reset scaling for loader dots
-                />
-              )}
-              {isAvatar && (
-                <MotionAvatarTile
-                  key="avatar"
-                  layoutId="avatar"
-                  {...animationProps}
-                  animate={avatarAnimate}
-                  transition={transition}
-                  videoTrack={agentVideoTrack}
-                  className={cn(
-                    'w-full [&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
-                    chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
-                  )}
-                />
-              )}
-            </AnimatePresence>
+            {/* Constrain width + center horizontally in 1-column view */}
+            <div className={cn(chatOpen ? 'w-full' : 'w-full max-w-[min(90vw,900px)] mx-auto')}>
+              <AnimatePresence mode="popLayout">
+                {!isAvatar && (
+                  <MotionAgentTile
+                    key="agent"
+                    layoutId="agent"
+                    {...animationProps}
+                    animate={agentAnimate}
+                    transition={transition}
+                    state={agentState}
+                    audioTrack={agentAudioTrack}
+                    className={cn('w-full scale-[1]')}
+                  />
+                )}
+                {isAvatar && (
+                  <MotionAvatarTile
+                    key="avatar"
+                    layoutId="avatar"
+                    {...animationProps}
+                    animate={avatarAnimate}
+                    transition={transition}
+                    videoTrack={agentVideoTrack}
+                    className={cn(
+                      'w-full [&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
+                      chatOpen ? 'max-h-[70vh]' : 'max-h-[75vh]'
+                    )}
+                  />
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
           {/* === Secondary Tile (camera or screen share) === */}
