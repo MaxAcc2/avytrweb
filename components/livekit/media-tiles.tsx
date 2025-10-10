@@ -1,4 +1,4 @@
-// components/livekit/media-tiles.tsx
+// media-tiles.tsx
 import React, { useMemo } from 'react';
 import { Track } from 'livekit-client';
 import { AnimatePresence, motion } from 'motion/react';
@@ -24,15 +24,25 @@ const animationProps = {
   transition: { type: 'spring', stiffness: 675, damping: 75, mass: 1 },
 };
 
+// ⬇️ Key changes: center horizontally only (1-col view) and keep vertical at top.
 const classNames = {
   grid: [
     'h-full w-full',
-    'grid gap-x-2 place-content-center',
+    'grid gap-x-2',
+    // Only horizontal centering for grid items; keep vertical at start
+    'items-start justify-items-center',
     'grid-cols-[1fr_1fr] grid-rows-[90px_1fr_90px]',
   ],
   agentChatOpenWithSecondTile: ['col-start-1 row-start-1', 'self-start justify-self-end'],
   agentChatOpenWithoutSecondTile: ['col-start-1 row-start-1', 'col-span-2', 'place-content-start'],
-  agentChatClosed: ['col-start-1 row-start-1', 'col-span-2 row-span-3', 'place-content-center'],
+  agentChatClosed: [
+    'col-start-1 row-start-1',
+    'col-span-2 row-span-3',
+    // top-aligned, horizontally centered
+    'self-start justify-self-center',
+    // ensure no vertical centering happens inside this grid
+    'place-content-start',
+  ],
   secondTileChatOpen: ['col-start-2 row-start-1', 'self-start justify-self-start'],
   secondTileChatClosed: ['col-start-2 row-start-3', 'place-content-end'],
 };
@@ -83,16 +93,15 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   return (
     <div
       className={cn(
-        'pointer-events-none relative z-10 flex w-full justify-center transition-all duration-500',
+        // 🧭 Anchored to top of column (no vertical centering)
+        'pointer-events-none relative z-10 flex w-full items-start justify-center transition-all duration-500',
         chatOpen
-          // 2-column view: top-anchored
-          ? 'items-start pt-[40px] pb-0 pl-[40px] pr-[60px]'
-          // 1-column view: centered (both axes) and constrained horizontally
-          : 'items-center min-h-screen px-4 sm:px-8'
+          ? 'pt-[40px] pb-0 pl-[40px] pr-[60px]' // 2-column padding
+          : 'pt-[60px] pb-0 px-8 md:px-16',       // 1-column centered padding
       )}
     >
       <div className="relative flex h-auto w-full items-start justify-center">
-        <div className={cn(classNames.grid, 'place-items-start')}>
+        <div className={cn(classNames.grid)}>
           {/* === Agent / Avatar === */}
           <div
             className={cn([
@@ -102,37 +111,36 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
               chatOpen && !hasSecondTile && classNames.agentChatOpenWithoutSecondTile,
             ])}
           >
-            {/* Constrain width + center horizontally in 1-column view */}
-            <div className={cn(chatOpen ? 'w-full' : 'w-full max-w-[min(90vw,900px)] mx-auto')}>
-              <AnimatePresence mode="popLayout">
-                {!isAvatar && (
-                  <MotionAgentTile
-                    key="agent"
-                    layoutId="agent"
-                    {...animationProps}
-                    animate={agentAnimate}
-                    transition={transition}
-                    state={agentState}
-                    audioTrack={agentAudioTrack}
-                    className={cn('w-full scale-[1]')}
-                  />
-                )}
-                {isAvatar && (
-                  <MotionAvatarTile
-                    key="avatar"
-                    layoutId="avatar"
-                    {...animationProps}
-                    animate={avatarAnimate}
-                    transition={transition}
-                    videoTrack={agentVideoTrack}
-                    className={cn(
-                      'w-full [&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
-                      chatOpen ? 'max-h-[70vh]' : 'max-h-[75vh]'
-                    )}
-                  />
-                )}
-              </AnimatePresence>
-            </div>
+            <AnimatePresence mode="popLayout">
+              {!isAvatar && (
+                <MotionAgentTile
+                  key="agent"
+                  layoutId="agent"
+                  {...animationProps}
+                  animate={agentAnimate}
+                  transition={transition}
+                  // keep horizontally centered with a sane max width
+                  className={cn('w-full max-w-5xl mx-auto scale-[1]')}
+                  state={agentState}
+                  audioTrack={agentAudioTrack}
+                />
+              )}
+              {isAvatar && (
+                <MotionAvatarTile
+                  key="avatar"
+                  layoutId="avatar"
+                  {...animationProps}
+                  animate={avatarAnimate}
+                  transition={transition}
+                  videoTrack={agentVideoTrack}
+                  className={cn(
+                    'w-full max-w-5xl mx-auto',
+                    '[&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
+                    chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
+                  )}
+                />
+              )}
+            </AnimatePresence>
           </div>
 
           {/* === Secondary Tile (camera or screen share) === */}
