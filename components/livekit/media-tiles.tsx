@@ -17,8 +17,7 @@ const MotionVideoTile = motion.create(VideoTile);
 const MotionAgentTile = motion.create(AgentTile);
 const MotionAvatarTile = motion.create(AvatarTile);
 
-// ✅ No scale-in on mount. We only fade and we set the starting scale
-// to the *final* value immediately via the `style` prop below.
+// Fade only; no scale-in
 const animationProps = {
   initial: { opacity: 0 },
   animate: { opacity: 1 },
@@ -74,7 +73,7 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
   const isScreenShareEnabled = screenShareTrack && !screenShareTrack.publication.isMuted;
   const hasSecondTile = isCameraEnabled || isScreenShareEnabled;
 
-  // We still like the slightly smaller look in 1-col; we just *start* there.
+  // Static “target” scale (no animation). 1-col is slightly smaller.
   const scaleValue = chatOpen ? 1 : 0.9;
   const transition = { ...animationProps.transition, delay: chatOpen ? 0 : 0.15 };
 
@@ -101,38 +100,57 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
               chatOpen && !hasSecondTile && classNames.agentChatOpenWithoutSecondTile,
             ])}
           >
-            {/* Disable initial mount animation so we start at final size */}
+            {/* Disable initial mount animation; no shared layout IDs */}
             <AnimatePresence mode="popLayout" initial={false}>
               {!isAvatar && (
-                <MotionAgentTile
-                  key="agent"
-                  layoutId="agent"
-                  {...animationProps}
-                  // Start at the final scale immediately
-                  style={{ scale: scaleValue, opacity: 1 }}
-                  animate={{ opacity: 1, scale: scaleValue }}
-                  transition={transition}
-                  className={cn('w-full max-w-5xl mx-auto scale-[1]')}
-                  state={agentState}
-                  audioTrack={agentAudioTrack}
-                />
-              )}
-              {isAvatar && (
-                <MotionAvatarTile
-                  key="avatar"
-                  layoutId="avatar"
-                  {...animationProps}
-                  // Start at the final scale immediately
-                  style={{ scale: scaleValue, opacity: 1 }}
-                  animate={{ opacity: 1, scale: scaleValue }}
-                  transition={transition}
-                  videoTrack={agentVideoTrack}
+                // Reserve space up-front so size doesn't "pop" when content loads
+                <div
+                  key="agent-wrapper"
                   className={cn(
                     'w-full max-w-5xl mx-auto',
-                    '[&>video]:w-full [&>video]:h-auto [&>video]:object-contain scale-[1]',
+                    'aspect-video',                     // ⬅️ reserve aspect ratio
                     chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
+                    'overflow-hidden',
                   )}
-                />
+                  style={{ transform: `scale(${scaleValue})` }} // static scale; no tween
+                >
+                  <MotionAgentTile
+                    key="agent"
+                    {...animationProps}
+                    transition={transition}
+                    className={cn(
+                      'h-full w-full',
+                      // ensure internal <video/canvas> fills the box
+                      '[&>video]:h-full [&>video]:w-full [&>video]:object-contain',
+                    )}
+                    state={agentState}
+                    audioTrack={agentAudioTrack}
+                  />
+                </div>
+              )}
+
+              {isAvatar && (
+                <div
+                  key="avatar-wrapper"
+                  className={cn(
+                    'w-full max-w-5xl mx-auto',
+                    'aspect-video',                     // ⬅️ reserve aspect ratio
+                    chatOpen ? 'max-h-[70vh]' : 'max-h-[80vh]',
+                    'overflow-hidden',
+                  )}
+                  style={{ transform: `scale(${scaleValue})` }} // static scale; no tween
+                >
+                  <MotionAvatarTile
+                    key="avatar"
+                    {...animationProps}
+                    transition={transition}
+                    videoTrack={agentVideoTrack}
+                    className={cn(
+                      'h-full w-full',
+                      '[&>video]:h-full [&>video]:w-full [&>video]:object-contain',
+                    )}
+                  />
+                </div>
               )}
             </AnimatePresence>
           </div>
@@ -149,8 +167,6 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
               {cameraTrack && isCameraEnabled && (
                 <MotionVideoTile
                   key="camera"
-                  layout="position"
-                  layoutId="camera"
                   {...animationProps}
                   transition={transition}
                   trackRef={cameraTrack}
@@ -160,8 +176,6 @@ export function MediaTiles({ chatOpen }: MediaTilesProps) {
               {isScreenShareEnabled && (
                 <MotionVideoTile
                   key="screen"
-                  layout="position"
-                  layoutId="screen"
                   {...animationProps}
                   transition={transition}
                   trackRef={screenShareTrack}
