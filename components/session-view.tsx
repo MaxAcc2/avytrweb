@@ -8,6 +8,7 @@ import {
   useRoomContext,
   useVoiceAssistant,
 } from '@livekit/components-react';
+import { RoomEvent, type RemoteParticipant } from 'livekit-client';
 import { toastAlert } from '@/components/alert-toast';
 import { AgentControlBar } from '@/components/livekit/agent-control-bar/agent-control-bar';
 import { ChatEntry } from '@/components/livekit/chat/chat-entry';
@@ -18,9 +19,107 @@ import type { AppConfig } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { ConversationLatencyVAD } from '@/components/livekit/conversation-latency-vad';
 
+/* ----------------------------- helpers/hooks ----------------------------- */
+
 function isAgentAvailable(agentState: AgentState) {
   return agentState === 'listening' || agentState === 'thinking' || agentState === 'speaking';
 }
+
+/** Try to build a human-friendly label from participant metadata/attributes. */
+function parseProviderLabel(p: RemoteParticipant): string | null {
+  // Metadata (JSON)
+  try {
+    const meta = p.metadata ? JSON.parse(p.metadata) : null;
+    if (meta?.label) return String(meta.label);
+    if (meta?.providers) {
+      const llm = meta.providers.llm ?? '';
+      const stt = meta.providers.stt ?? '';
+      const tts =
+        typeof meta.providers.tts === 'string'
+          ? meta.providers.tts
+          : meta.providers.tts?.model ?? '';
+      const avatar =
+        typeof meta.providers.avatar === 'string'
+          ? meta.providers.avatar
+          : meta.providers.avatar?.provider ?? '';
+      const parts = [llm, stt, tts, avatar].filter(Boolean);
+      if (parts.length) return parts.join(' · ');
+    }
+  } catch {
+    /* ignore */
+  }
+
+  // Attributes (kv)
+  const attrs = (p as any).attributes as Record<string, string> | undefined;
+  if (attrs) {
+    if (attrs['prov.label']) return attrs['prov.label'];
+    const parts = ['prov.llm', 'prov.stt', 'prov.tts', 'prov.avatar']
+      .map((k) => attrs[k])
+      .filter(Boolean);
+    if (parts.length) return parts.join(' · ');
+  }
+  return null;
+}
+
+/** Prefer a participant that actually has provenance fields; fallback to avatar/agent-ish names. */
+function pickProvenanceParticipant(room: ReturnType<typeof useRoomContext>): RemoteParticipant | null {
+  const candidates = Array.from(room.remoteParticipants.values());
+  for (const p of candidates) {
+    if (parseProviderLabel(p)) return p;
+  }
+  const byNameHint = (p: RemoteParticipant) => /avatar|agent/i.test(p.name ?? '');
+  return candidates.find(byNameHint) ?? null;
+}
+
+/** Hook that returns the current provider label (updates on joins/metadata/attribute changes). */
+function useProviderBadgeLabel() {
+  const room = useRoomContext();
+  const [label, setLabel] = React.useState<string | null>(null);
+
+  useEffect(() => {
+    const compute = () => {
+      const p = pickProvenanceParticipant(room);
+      setLabel(p ? parseProviderLabel(p) : null);
+    };
+    compute();
+
+    const onConnected = () => compute();
+    const onParticipant = () => compute();
+    const onMetaChanged = () => compute();
+    const onAttrsChanged = () => compute();
+
+    room.on(RoomEvent.SignalConnected, onConnected);
+    room.on(RoomEvent.ParticipantConnected, onParticipant);
+    room.on(RoomEvent.ParticipantDisconnected, onParticipant);
+    room.on(RoomEvent.ParticipantMetadataChanged, onMetaChanged);
+    // @ts-expect-error: Attributes event is present; types may lag depending on SDK version.
+    room.on(RoomEvent.ParticipantAttributesChanged, onAttrsChanged);
+
+    return () => {
+      room.off(RoomEvent.SignalConnected, onConnected);
+      room.off(RoomEvent.ParticipantConnected, onParticipant);
+      room.off(RoomEvent.ParticipantDisconnected, onParticipant);
+      room.off(RoomEvent.ParticipantMetadataChanged, onMetaChanged);
+      // @ts-expect-error see above
+      room.off(RoomEvent.ParticipantAttributesChanged, onAttrsChanged);
+    };
+  }, [room]);
+
+  return label;
+}
+
+/** Little pill UI for the provider label; replace with your own component if desired. */
+function ProviderBadge() {
+  const label = useProviderBadgeLabel();
+  if (!label) return null;
+  return (
+    <div className="pointer-events-auto rounded-full border border-border/70 bg-muted/80 px-3 py-1 text-xs font-medium text-foreground/90 shadow backdrop-blur">
+      {label}
+    </div>
+  );
+}
+
+/* ---------------------------------- view --------------------------------- */
 
 interface SessionViewProps {
   appConfig: AppConfig;
@@ -150,6 +249,16 @@ export const SessionView = ({
     >
       {/* LEFT: avatar / video */}
       <div className="relative flex items-start justify-center overflow-hidden bg-background transition-all duration-500 pt-[40px] md:pt-[80px] md:overflow-visible md:min-h-screen">
+        {/* Centered overlay above the avatar: provider badge + latency meter */}
+        <div className="pointer-events-none absolute top-2 md:top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2">
+          <ProviderBadge />
+          {sessionStarted && (
+            <div className="pointer-events-auto">
+              <ConversationLatencyVAD />
+            </div>
+          )}
+        </div>
+
         {/* IMPORTANT: pass the STABILIZED flag, not raw chatOpen */}
         <MediaTiles chatOpen={gridChatOpen} />
       </div>
@@ -230,10 +339,8 @@ export const SessionView = ({
         </motion.div>
       </div>
 
-      {/* latency overlay always visible */}
-      <div className="z-[60] pointer-events-none fixed top-0 right-0">
-        {sessionStarted && <ConversationLatencyVAD />}
-      </div>
+      {/* NOTE: the old top-right latency overlay was removed;
+          it's now centered above the avatar next to ProviderBadge */}
     </section>
   );
 };
